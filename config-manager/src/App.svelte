@@ -451,7 +451,7 @@
       <div class="cards-grid">
         <section class="config-card">
           <div class="card-head"><span><Icon name="volume" size={17} /></span><div><h3>{text.feedbackTitle}</h3><p>{text.feedbackDesc}</p></div></div>
-          <label class="control-row"><strong>{text.hapticsGain}</strong><input type="range" min="0.25" max="2" step="0.01" bind:value={config.haptics_gain} /><input type="number" min="0.25" max="2" step="0.01" bind:value={config.haptics_gain} /></label>
+          <label class="control-row"><strong>{text.hapticsGain}</strong><input type="range" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} /><input type="number" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} /></label>
           <label class="control-row"><strong>{text.speakerVolume}</strong><input type="range" min="0" max="100" step="1" bind:value={config.speaker_volume_percent} /><input type="number" min="0" max="100" step="1" bind:value={config.speaker_volume_percent} /></label>
           <label class="control-row"><strong>{text.hapticsBuffer}</strong><input type="range" min="16" max="128" step="1" bind:value={config.haptics_buffer_length} /><input type="number" min="16" max="128" step="1" bind:value={config.haptics_buffer_length} /></label>
         </section>
@@ -502,3 +502,4 @@
     </aside>
   </div>
 </main>
+

@@ -121,20 +121,10 @@ jobs:
           fi
           git -C "$PICO_SDK_PATH/lib/tinyusb" checkout --detach "$TINYUSB_REF"
 
-      - name: Build standard firmware
-        if: env.REUSE_FIRMWARE != 'true'
-        run: |
-          cmake -S . -B build/standard -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DPICO_SDK_PATH="$PICO_SDK_PATH" \
-            -DVERSION="$FIRMWARE_VERSION"
-          cmake --build build/standard --target ds5-bridge
-          mkdir -p artifacts
-          cp build/standard/ds5-bridge.uf2 "artifacts/ds5-bridge-${{ github.event.release.tag_name }}.uf2"
-
       - name: Build Debug firmware
         if: env.REUSE_FIRMWARE != 'true'
         run: |
+          mkdir -p artifacts
           cmake -S . -B build/debug -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DPICO_SDK_PATH="$PICO_SDK_PATH" \

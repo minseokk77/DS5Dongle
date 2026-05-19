@@ -11,7 +11,7 @@ rssi = 0xf9
 [config]
 version = 1
 body_length = 15
-haptics_gain_min = 0.25
+haptics_gain_min = 0.1
 haptics_gain_max = 2.0
 speaker_volume_percent_min = 0.0
 speaker_volume_percent_max = 100.0

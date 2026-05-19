@@ -78,18 +78,9 @@ jobs:
           fi
           git -C "$PICO_SDK_PATH/lib/tinyusb" checkout --detach "$TINYUSB_REF"
 
-      - name: Build standard firmware
-        run: |
-          cmake -S . -B build/standard -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DPICO_SDK_PATH="$PICO_SDK_PATH" \
-            -DVERSION="$FIRMWARE_VERSION"
-          cmake --build build/standard --target ds5-bridge
-          mkdir -p artifacts
-          cp build/standard/ds5-bridge.uf2 artifacts/ds5-bridge.uf2
-
       - name: Build Debug firmware
         run: |
+          mkdir -p artifacts
           cmake -S . -B build/debug -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DPICO_SDK_PATH="$PICO_SDK_PATH" \
@@ -117,13 +108,6 @@ jobs:
             -DVERSION="$FIRMWARE_VERSION"
           cmake --build build/picow --target ds5-bridge
           cp build/picow/ds5-bridge.uf2 artifacts/ds5-bridge-picow.uf2
-
-      - name: Upload standard UF2 artifact
-        uses: actions/upload-artifact@v7
-        with:
-          path: artifacts/ds5-bridge.uf2
-          archive: false
-          if-no-files-found: error
 
       - name: Upload Debug UF2 artifact
         uses: actions/upload-artifact@v7
