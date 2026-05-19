@@ -1,10 +1,12 @@
-use serde::{Deserialize, Serialize};
+use crate::bridge;
 use crate::settings::settings;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
 use thiserror::Error;
 
@@ -20,6 +22,8 @@ pub enum UpdateError {
     Io(#[from] std::io::Error),
     #[error("Windows 볼륨 정보를 읽지 못했습니다. {0}")]
     Volume(String),
+    #[error("부트로더 진입 명령을 보내지 못했습니다. {0}")]
+    Bridge(#[from] bridge::BridgeError),
 }
 
 impl serde::Serialize for UpdateError {
@@ -91,9 +95,21 @@ pub fn check_debug_firmware_update() -> Result<FirmwareUpdateInfo, UpdateError> 
         .ok_or(UpdateError::NoDebugAsset)
 }
 
-pub fn flash_latest_debug_firmware() -> Result<FirmwareFlashResult, UpdateError> {
+pub fn flash_latest_debug_firmware(
+    device_id: Option<String>,
+) -> Result<FirmwareFlashResult, UpdateError> {
     let update = check_debug_firmware_update()?;
-    let drive = find_bootloader_drive()?;
+    let drive = match find_bootloader_drive_optional()? {
+        Some(drive) => drive,
+        None => {
+            if let Some(device_id) = device_id.as_deref().filter(|value| !value.is_empty()) {
+                bridge::enter_bootloader(device_id)?;
+                wait_for_bootloader_drive(Duration::from_secs(18))?
+            } else {
+                return Err(UpdateError::BootDriveNotFound);
+            }
+        }
+    };
     let bytes = github_client()
         .get(&update.download_url)
         .send()?
@@ -115,17 +131,30 @@ fn github_client() -> reqwest::blocking::Client {
         .timeout(Duration::from_secs(45))
         .user_agent("DS5-Bridge-Config/0.1")
         .build()
-        .expect("HTTP 클라이언트 생성 실패")
+        .expect("HTTP 클라이언트 생성에 실패했습니다.")
 }
 
-fn find_bootloader_drive() -> Result<String, UpdateError> {
+fn find_bootloader_drive_optional() -> Result<Option<String>, UpdateError> {
     for label in ["RP2350", "RPI-RP2"] {
         if let Some(drive) = find_drive_by_label(label)? {
-            return Ok(drive);
+            return Ok(Some(drive));
         }
     }
 
-    Err(UpdateError::BootDriveNotFound)
+    Ok(None)
+}
+
+fn wait_for_bootloader_drive(timeout: Duration) -> Result<String, UpdateError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(drive) = find_bootloader_drive_optional()? {
+            return Ok(drive);
+        }
+        if Instant::now() >= deadline {
+            return Err(UpdateError::BootDriveNotFound);
+        }
+        thread::sleep(Duration::from_millis(350));
+    }
 }
 
 fn find_drive_by_label(label: &str) -> Result<Option<String>, UpdateError> {

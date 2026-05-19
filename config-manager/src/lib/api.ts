@@ -98,9 +98,9 @@ export async function checkDebugFirmwareUpdate(): Promise<FirmwareUpdateInfo> {
   }
 }
 
-export async function flashLatestDebugFirmware(): Promise<FirmwareFlashResult> {
+export async function flashLatestDebugFirmware(deviceId?: string): Promise<FirmwareFlashResult> {
   try {
-    return await invoke<FirmwareFlashResult>('flash_latest_debug_firmware');
+    return await invoke<FirmwareFlashResult>('flash_latest_debug_firmware', { deviceId });
   } catch (error) {
     throw friendlyError(error, '공식 debug 펌웨어를 업데이트하지 못했습니다.');
   }

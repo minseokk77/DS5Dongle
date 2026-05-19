@@ -37,6 +37,6 @@ pub fn check_debug_firmware_update() -> Result<FirmwareUpdateInfo, UpdateError> 
 }
 
 #[tauri::command]
-pub fn flash_latest_debug_firmware() -> Result<FirmwareFlashResult, UpdateError> {
-    updater::flash_latest_debug_firmware()
+pub fn flash_latest_debug_firmware(device_id: Option<String>) -> Result<FirmwareFlashResult, UpdateError> {
+    updater::flash_latest_debug_firmware(device_id)
 }

@@ -131,6 +131,10 @@ pub fn reconnect_usb(device_id: &str) -> Result<(), BridgeError> {
     send_command(device_id, 0x03, None)
 }
 
+pub fn enter_bootloader(device_id: &str) -> Result<(), BridgeError> {
+    send_command(device_id, 0x04, None)
+}
+
 fn open_device(device_id: &str) -> Result<HidDevice, BridgeError> {
     let api = HidApi::new().map_err(|error| BridgeError::HidInit(error.to_string()))?;
     let device_path = std::ffi::CString::new(device_id).map_err(|_| {

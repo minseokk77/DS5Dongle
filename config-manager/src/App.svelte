@@ -355,7 +355,7 @@
     await runTask(async () => {
       const update = await checkDebugFirmwareUpdate();
       showToast(`${text.status.updateReady}: ${update.version} / ${update.asset_name}`);
-      const result = await flashLatestDebugFirmware();
+      const result = await flashLatestDebugFirmware(selectedDeviceId || undefined);
       setStatus('updated');
       showToast(`${text.status.updated}: ${result.version} / ${result.asset_name}`);
     });
