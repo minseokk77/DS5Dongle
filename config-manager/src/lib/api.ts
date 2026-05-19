@@ -1,0 +1,112 @@
+﻿import { invoke } from '@tauri-apps/api/core';
+
+export type PollingRateMode = 0 | 1 | 2;
+export type ControllerMode = 0 | 1 | 2;
+
+export interface BridgeDevice {
+  id: string;
+  label: string;
+  vendor_id: number;
+  product_id: number;
+  serial_number?: string | null;
+}
+
+export interface BridgeConfig {
+  config_version: number;
+  haptics_gain: number;
+  speaker_volume_percent: number;
+  inactive_time: number;
+  disable_inactive_disconnect: boolean;
+  disable_pico_led: boolean;
+  polling_rate_mode: PollingRateMode;
+  haptics_buffer_length: number;
+  controller_mode: ControllerMode;
+}
+
+export interface DeviceInfo {
+  firmware_version?: string | null;
+  rssi?: number | null;
+  firmware_error?: string | null;
+  rssi_error?: string | null;
+}
+
+export interface FirmwareUpdateInfo {
+  version: string;
+  asset_name: string;
+  download_url: string;
+}
+
+export interface FirmwareFlashResult {
+  version: string;
+  asset_name: string;
+  drive: string;
+}
+
+export async function listDevices(): Promise<BridgeDevice[]> {
+  try {
+    return await invoke<BridgeDevice[]>('list_devices');
+  } catch (error) {
+    throw friendlyError(error, 'USB 장치 목록을 불러오지 못했습니다.');
+  }
+}
+
+export async function readConfig(deviceId: string): Promise<BridgeConfig> {
+  try {
+    return await invoke<BridgeConfig>('read_config', { deviceId });
+  } catch (error) {
+    throw friendlyError(error, '장치 설정을 읽지 못했습니다.');
+  }
+}
+
+export async function readDeviceInfo(deviceId: string): Promise<DeviceInfo> {
+  try {
+    return await invoke<DeviceInfo>('read_device_info', { deviceId });
+  } catch (error) {
+    throw friendlyError(error, '장치 정보를 읽지 못했습니다.');
+  }
+}
+
+export async function applyConfig(deviceId: string, config: BridgeConfig): Promise<void> {
+  try {
+    await invoke('apply_config', { deviceId, config });
+  } catch (error) {
+    throw friendlyError(error, '설정을 장치에 적용하지 못했습니다.');
+  }
+}
+
+export async function saveConfig(deviceId: string): Promise<void> {
+  try {
+    await invoke('save_config', { deviceId });
+  } catch (error) {
+    throw friendlyError(error, '설정을 플래시에 저장하지 못했습니다.');
+  }
+}
+
+export async function reconnectUsb(deviceId: string): Promise<void> {
+  try {
+    await invoke('reconnect_usb', { deviceId });
+  } catch (error) {
+    throw friendlyError(error, 'USB 재연결 명령을 보내지 못했습니다.');
+  }
+}
+
+export async function checkDebugFirmwareUpdate(): Promise<FirmwareUpdateInfo> {
+  try {
+    return await invoke<FirmwareUpdateInfo>('check_debug_firmware_update');
+  } catch (error) {
+    throw friendlyError(error, '공식 debug 펌웨어 업데이트를 확인하지 못했습니다.');
+  }
+}
+
+export async function flashLatestDebugFirmware(): Promise<FirmwareFlashResult> {
+  try {
+    return await invoke<FirmwareFlashResult>('flash_latest_debug_firmware');
+  } catch (error) {
+    throw friendlyError(error, '공식 debug 펌웨어를 업데이트하지 못했습니다.');
+  }
+}
+
+function friendlyError(error: unknown, fallback: string): Error {
+  const detail = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
+  return new Error(detail ? `${fallback} ${detail}` : fallback);
+}

@@ -1,0 +1,26 @@
+[usb]
+sony_vendor_id = 0x054c
+product_ids = [0x0ce6, 0x0df2]
+
+[reports]
+config_read = 0xf7
+command = 0xf6
+firmware_version = 0xf8
+rssi = 0xf9
+
+[config]
+version = 1
+body_length = 15
+haptics_gain_min = 0.25
+haptics_gain_max = 2.0
+speaker_volume_percent_min = 0.0
+speaker_volume_percent_max = 100.0
+inactive_time_min = 5
+inactive_time_max = 60
+haptics_buffer_length_min = 16
+haptics_buffer_length_max = 128
+
+[firmware_update]
+github_owner = "minseokk77"
+github_repo = "DS5Dongle"
+debug_asset_keyword = "debug"

@@ -3,3 +3,7 @@ build
 .idea
 example
 *.uf2
+config-manager/node_modules/
+config-manager/dist/
+config-manager/src-tauri/target/
+config-manager/*.log

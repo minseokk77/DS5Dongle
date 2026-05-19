@@ -36,9 +36,43 @@ jobs:
       - name: Set firmware version
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: printf 'FIRMWARE_VERSION=%s\n' "$RELEASE_TAG" >> "$GITHUB_ENV"
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          printf 'FIRMWARE_VERSION=%s\n' "$RELEASE_TAG" >> "$GITHUB_ENV"
+          if printf '%s' "$RELEASE_BODY" | grep -Eq '\[(program-only|reuse-firmware)\]'; then
+            printf 'REUSE_FIRMWARE=true\n' >> "$GITHUB_ENV"
+          else
+            printf 'REUSE_FIRMWARE=false\n' >> "$GITHUB_ENV"
+          fi
+
+      - name: Reuse UF2 files from previous firmware release
+        if: env.REUSE_FIRMWARE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          previous_tag="$(
+            gh release list --limit 50 --json tagName,isDraft |
+              jq -r --arg current "$CURRENT_TAG" '.[] | select(.isDraft == false and .tagName != $current) | .tagName' |
+              while read -r tag; do
+                if gh release view "$tag" --json assets |
+                  jq -e '.assets[] | select(.name | endswith(".uf2"))' >/dev/null; then
+                  printf '%s\n' "$tag"
+                  break
+                fi
+              done
+          )"
+          if [ -z "$previous_tag" ]; then
+            echo "No previous release with UF2 assets found." >&2
+            exit 1
+          fi
+          gh release download "$previous_tag" --pattern '*.uf2' --dir artifacts
+          gh release upload "$CURRENT_TAG" artifacts/*.uf2 --clobber
 
       - name: Prepare build dependency cache
+        if: env.REUSE_FIRMWARE != 'true'
         id: apt-cache
         run: |
           mkdir -p "$RUNNER_TEMP/apt-cache/partial"
@@ -49,6 +83,7 @@ jobs:
           echo "package-hash=$package_hash" >> "$GITHUB_OUTPUT"
 
       - name: Cache build dependencies
+        if: env.REUSE_FIRMWARE != 'true'
         uses: actions/cache@v4
         with:
           path: ${{ steps.apt-cache.outputs.dir }}
@@ -57,6 +92,7 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-cache.outputs.os }}-
 
       - name: Install build dependencies
+        if: env.REUSE_FIRMWARE != 'true'
         run: |
           sudo apt-get update
           sudo apt-get -o Dir::Cache::archives="${{ steps.apt-cache.outputs.dir }}" install --download-only -y $APT_PACKAGES
@@ -64,6 +100,7 @@ jobs:
           sudo chmod -R a+rX "${{ steps.apt-cache.outputs.dir }}"
 
       - name: Cache Pico SDK
+        if: env.REUSE_FIRMWARE != 'true'
         id: cache-pico-sdk
         uses: actions/cache@v4
         with:
@@ -71,12 +108,13 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-pico-sdk-${{ env.PICO_SDK_REF }}-tinyusb-${{ env.TINYUSB_REF }}
 
       - name: Download Pico SDK
-        if: steps.cache-pico-sdk.outputs.cache-hit != 'true'
+        if: env.REUSE_FIRMWARE != 'true' && steps.cache-pico-sdk.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 --branch "$PICO_SDK_REF" https://github.com/raspberrypi/pico-sdk.git "$PICO_SDK_PATH"
           git -C "$PICO_SDK_PATH" submodule update --init --recursive
 
       - name: Switch TinyUSB to configured tag
+        if: env.REUSE_FIRMWARE != 'true'
         run: |
           if ! git -C "$PICO_SDK_PATH/lib/tinyusb" rev-parse -q --verify "refs/tags/$TINYUSB_REF" >/dev/null; then
             git -C "$PICO_SDK_PATH/lib/tinyusb" fetch --depth 1 origin "refs/tags/$TINYUSB_REF:refs/tags/$TINYUSB_REF"
@@ -84,6 +122,7 @@ jobs:
           git -C "$PICO_SDK_PATH/lib/tinyusb" checkout --detach "$TINYUSB_REF"
 
       - name: Build standard firmware
+        if: env.REUSE_FIRMWARE != 'true'
         run: |
           cmake -S . -B build/standard -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -94,6 +133,7 @@ jobs:
           cp build/standard/ds5-bridge.uf2 "artifacts/ds5-bridge-${{ github.event.release.tag_name }}.uf2"
 
       - name: Build Debug firmware
+        if: env.REUSE_FIRMWARE != 'true'
         run: |
           cmake -S . -B build/debug -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -105,6 +145,7 @@ jobs:
           cp build/debug/ds5-bridge.uf2 "artifacts/ds5-bridge-debug-${{ github.event.release.tag_name }}.uf2"
 
       - name: Upload UF2 files to release
+        if: env.REUSE_FIRMWARE != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
