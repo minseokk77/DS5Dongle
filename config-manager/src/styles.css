@@ -281,6 +281,25 @@ input[type="checkbox"]:checked::after { transform: translateX(14px); }
 .action-stack button.primary { background: var(--primary); border-color: var(--primary); color: #ffffff; }
 .action-stack button.primary:hover:not(:disabled) { background: var(--primary-hover); }
 .action-stack button.ghost { background: transparent; border-color: transparent; box-shadow: none; }
+.auto-update-row {
+  height: 35px;
+  padding: 0 11px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-radius: 9px;
+  background: var(--control);
+  color: var(--text);
+  font-size: .78rem;
+  font-weight: 800;
+  box-shadow: var(--card-shadow);
+}
+.auto-update-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .state-card { margin-top: 17px; background: var(--control-2); border-radius: 10px; padding: 14px 13px; min-height: 68px; box-shadow: var(--card-shadow); }
 .state-card strong { display: block; margin-top: 7px; font-size: .88rem; }
 .state-card p { margin: 6px 0 0; color: #fbbf24; font-size: .76rem; }
@@ -307,7 +326,8 @@ input[type="checkbox"]:checked::after { transform: translateX(14px); }
 .actions-panel,
 .config-card,
 .control-row,
-.switch-row { min-width: 0; }
+.switch-row,
+.auto-update-row { min-width: 0; }
 .card-head > div,
 .device-left,
 .device-name,

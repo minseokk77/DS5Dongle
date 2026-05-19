@@ -26,7 +26,8 @@
     | 'reconnectSent'
     | 'defaults'
     | 'updateReady'
-    | 'updated';
+    | 'updated'
+    | 'upToDate';
 
   const defaultConfig: BridgeConfig = {
     config_version: 1,
@@ -76,6 +77,7 @@
       saveToFlash: '플래시에 저장',
       reconnectUsb: 'USB 재연결',
       firmwareUpdate: 'debug 펌웨어 업데이트',
+      autoFirmwareUpdate: '자동 업데이트',
       resetDefaults: '기본값 복원',
       state: '상태',
       dirty: '변경 사항이 있습니다.',
@@ -89,7 +91,8 @@
         reconnectSent: 'USB 재연결 명령을 보냈습니다.',
         defaults: '기본값을 불러왔습니다.',
         updateReady: '공식 debug 펌웨어 업데이트 가능',
-        updated: 'debug 펌웨어 업데이트 파일을 복사했습니다.'
+        updated: 'debug 펌웨어 업데이트 파일을 복사했습니다.',
+        upToDate: '최신 debug 펌웨어입니다.'
       }
     },
     en: {
@@ -127,6 +130,7 @@
       saveToFlash: 'Save to Flash',
       reconnectUsb: 'Reconnect USB',
       firmwareUpdate: 'Update debug firmware',
+      autoFirmwareUpdate: 'Auto update',
       resetDefaults: 'Reset to Defaults',
       state: 'State',
       dirty: 'There are unsaved changes.',
@@ -140,7 +144,8 @@
         reconnectSent: 'USB reconnect command was sent.',
         defaults: 'Defaults loaded.',
         updateReady: 'Official debug firmware update is available',
-        updated: 'Debug firmware file was copied.'
+        updated: 'Debug firmware file was copied.',
+        upToDate: 'Debug firmware is up to date.'
       }
     },
     zh: {
@@ -178,6 +183,7 @@
       saveToFlash: '保存到闪存',
       reconnectUsb: '重新连接 USB',
       firmwareUpdate: '更新 debug 固件',
+      autoFirmwareUpdate: '自动更新',
       resetDefaults: '恢复默认值',
       state: '状态',
       dirty: '有未保存的更改。',
@@ -191,7 +197,8 @@
         reconnectSent: '已发送 USB 重新连接命令。',
         defaults: '已加载默认值。',
         updateReady: '可更新官方 debug 固件',
-        updated: '已复制 debug 固件文件。'
+        updated: '已复制 debug 固件文件。',
+        upToDate: 'debug 固件已是最新。'
       }
     }
   } satisfies Record<Lang, Record<string, unknown> & { status: Record<StatusCode, string> }>;
@@ -211,6 +218,7 @@
   let toastTimer: number | undefined;
   let isBusy = false;
   let errorText = '';
+  let autoFirmwareUpdate = false;
 
   $: text = i18n[lang];
   $: effectiveTheme = themeMode === 'system' ? systemTheme : themeMode;
@@ -233,6 +241,7 @@
 
     syncSystemTheme();
     mediaQuery.addEventListener('change', syncSystemTheme);
+    autoFirmwareUpdate = localStorage.getItem('ds5:autoFirmwareUpdate') === 'true';
     void refreshDevices();
 
     return () => {
@@ -265,6 +274,11 @@
     themeMode = nextThemeMode;
   }
 
+  function setAutoFirmwareUpdate(enabled: boolean) {
+    autoFirmwareUpdate = enabled;
+    localStorage.setItem('ds5:autoFirmwareUpdate', String(enabled));
+  }
+
   async function runTask(task: () => Promise<void>) {
     isBusy = true;
     errorText = '';
@@ -294,7 +308,11 @@
       }
 
       await readAll();
-      setStatus('connected');
+      if (autoFirmwareUpdate) {
+        await performFirmwareUpdate(true);
+      } else {
+        setStatus('connected');
+      }
     });
   }
 
@@ -352,13 +370,20 @@
   }
 
   async function onFirmwareUpdate() {
-    await runTask(async () => {
-      const update = await checkDebugFirmwareUpdate();
-      showToast(`${text.status.updateReady}: ${update.version} / ${update.asset_name}`);
-      const result = await flashLatestDebugFirmware(selectedDeviceId || undefined);
-      setStatus('updated');
-      showToast(`${text.status.updated}: ${result.version} / ${result.asset_name}`);
-    });
+    await runTask(() => performFirmwareUpdate(false));
+  }
+
+  async function performFirmwareUpdate(skipIfCurrent: boolean) {
+    const update = await checkDebugFirmwareUpdate();
+    if (skipIfCurrent && deviceInfo.firmware_version === update.version) {
+      setStatus('upToDate');
+      return;
+    }
+
+    showToast(`${text.status.updateReady}: ${update.version} / ${update.asset_name}`);
+    const result = await flashLatestDebugFirmware(selectedDeviceId || undefined);
+    setStatus('updated');
+    showToast(`${text.status.updated}: ${result.version} / ${result.asset_name}`);
   }
 
   function resetToDefaults() {
@@ -468,6 +493,10 @@
         <button type="button" on:click={onReconnect} disabled={!isConnected || isBusy}><Icon name="power" size={15} /> {text.reconnectUsb}</button>
         <button type="button" on:click={onFirmwareUpdate} disabled={isBusy}><Icon name="download" size={15} /> {text.firmwareUpdate}</button>
         <button class="ghost" type="button" on:click={resetToDefaults} disabled={isBusy}><Icon name="rotate-ccw" size={15} /> {text.resetDefaults}</button>
+        <label class="auto-update-row">
+          <span>{text.autoFirmwareUpdate}</span>
+          <input type="checkbox" checked={autoFirmwareUpdate} on:change={(event) => setAutoFirmwareUpdate(event.currentTarget.checked)} />
+        </label>
       </div>
       <div class="state-card"><div class="overline">{text.state}</div><strong>{statusText}</strong>{#if isDirty}<p>{text.dirty}</p>{/if}</div>
     </aside>
