@@ -121,6 +121,10 @@ jobs:
           fi
           git -C "$PICO_SDK_PATH/lib/tinyusb" checkout --detach "$TINYUSB_REF"
 
+      - name: Apply custom haptics gain range
+        if: env.REUSE_FIRMWARE != 'true'
+        run: python3 scripts/apply_custom_haptics_gain.py
+
       - name: Build Debug firmware
         if: env.REUSE_FIRMWARE != 'true'
         run: |

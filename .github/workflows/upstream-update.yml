@@ -75,6 +75,6 @@ jobs:
             Updates this fork from upstream `${{ steps.upstream.outputs.current }}` to `${{ steps.upstream.outputs.latest }}`.
 
             Custom patch reapplied:
-            - `haptics_gain` minimum remains `0.25`
+            - `haptics_gain` minimum is changed to `0.1`
 
             After this PR is merged, publish a GitHub Release from the fork tag to build and upload custom UF2 files.
