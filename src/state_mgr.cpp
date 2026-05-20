@@ -30,6 +30,10 @@ static constexpr uint8_t state_init_data[63] = {
 
 uint8_t state[63]{};
 
+static void set_bit(uint8_t &byte, const int bit, const bool value) {
+    byte = (byte & ~(1 << bit)) | (value << bit);
+}
+
 void state_init() {
     memcpy(state, state_init_data, sizeof(state));
 }
@@ -58,10 +62,6 @@ void state_update(const uint8_t *data, const uint8_t size) {
             memcpy(state + offset, data + offset, length);
         }
     };
-    auto set_bit = [](uint8_t &byte, const int bit, const bool value) {
-        byte = (byte & ~(1 << bit)) | (value << bit);
-    };
-
     set_bit(state[0], 0, update.EnableRumbleEmulation);
     set_bit(state[0], 1, update.UseRumbleNotHaptics);
     set_bit(state[38], 2, update.EnableImprovedRumbleEmulation);
@@ -81,16 +81,16 @@ void state_update(const uint8_t *data, const uint8_t size) {
         offsetof(SetStateData, VolumeSpeaker),
         sizeof(update.VolumeSpeaker)
     );*/
-    /*copy_if_allowed(
+    copy_if_allowed(
         update.AllowMicVolume,
         offsetof(SetStateData, VolumeMic),
         sizeof(update.VolumeMic)
-    );*/
-    /*copy_if_allowed(
+    );
+    copy_if_allowed(
         update.AllowAudioControl,
         kAudioControlOffset,
         sizeof(uint8_t)
-    );*/
+    );
 
     copy_if_allowed(
         update.AllowMuteLight,
@@ -98,11 +98,11 @@ void state_update(const uint8_t *data, const uint8_t size) {
         sizeof(update.MuteLightMode)
     );
 
-    /*copy_if_allowed(
+    copy_if_allowed(
         update.AllowAudioMute,
         kMuteControlOffset,
         sizeof(uint8_t)
-    );*/
+    );
 
     copy_if_allowed(
         update.AllowRightTriggerFFB,
@@ -151,4 +151,15 @@ void state_update(const uint8_t *data, const uint8_t size) {
         offsetof(SetStateData, LedRed),
         sizeof(update.LedRed) * 3
     );
+}
+
+void state_set_mic_muted(const bool muted) {
+    set_bit(state[1], 0, true); // AllowMuteLight
+    set_bit(state[1], 1, true); // AllowAudioMute
+    state[8] = muted ? MuteLight::On : MuteLight::Off;
+    set_bit(state[9], 4, muted); // MicMute
+}
+
+bool state_get_mic_muted() {
+    return (state[9] & (1 << 4)) != 0;
 }

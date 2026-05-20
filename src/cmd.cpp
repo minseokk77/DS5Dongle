@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "bt.h"
+#include "battery_led.h"
 #include "config.h"
 #include "device/usbd.h"
 #include "pico/bootrom.h"
@@ -17,6 +18,7 @@
 bool is_pico_cmd(uint8_t report_id) {
     if (report_id == 0xf6 ||
         report_id == 0xf7 ||
+        report_id == 0xf5 ||
         report_id == 0xf8 ||
         report_id == 0xf9
     ) {
@@ -53,6 +55,21 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
         printf("[HID] 0xf9 RSSI=%d raw=0x%02X\n", rssi, buffer[0]);
 #endif
         return 1;
+    }
+    if (report_id == 0xf5) {
+        uint8_t level = 0;
+        uint8_t state = 0;
+        uint8_t raw = 0;
+        if (reqlen < 3 || !battery_led_get_status(&level, &state, &raw)) {
+            return 0;
+        }
+        buffer[0] = level;
+        buffer[1] = state;
+        buffer[2] = raw;
+#if ENABLE_VERBOSE
+        printf("[HID] 0xf5 battery=%u state=0x%02X raw=0x%02X\n", level, state, raw);
+#endif
+        return 3;
     }
     return 0;
 }

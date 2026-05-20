@@ -88,11 +88,8 @@ add_executable(ds5-bridge
         src/config.cpp
         src/cmd.cpp
         src/state_mgr.cpp
+        src/battery_led.cpp
 )
-
-if (ENABLE_BATT_LED)
-        target_sources(ds5-bridge PRIVATE src/battery_led.cpp)
-endif ()
 
 # Cockos WDLResampler
 add_library(wdl_resampler STATIC

@@ -37,6 +37,28 @@ void battery_led_note_report(void) {
     last_report_us = time_us_64();
 }
 
+bool battery_led_get_status(uint8_t *level_percent, uint8_t *power_state, uint8_t *raw_value) {
+    const uint64_t now = time_us_64();
+    if (last_report_us == 0 || (now - last_report_us) >= REPORT_STALE_US) {
+        return false;
+    }
+
+    const uint8_t raw = interrupt_in_data[52];
+    const uint8_t pct = raw & 0x0F;
+    const uint8_t st = (raw >> 4) & 0x0F;
+
+    if (level_percent) {
+        *level_percent = pct >= 10 ? 100 : pct * 10;
+    }
+    if (power_state) {
+        *power_state = st;
+    }
+    if (raw_value) {
+        *raw_value = raw;
+    }
+    return true;
+}
+
 void battery_led_tick(void) {
     const uint64_t now = time_us_64();
     if (last_report_us == 0 || (now - last_report_us) >= REPORT_STALE_US) {

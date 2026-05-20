@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 void battery_led_init(void);
 
 // Call once per main-loop iteration. Drives the LED blink while the
@@ -16,3 +18,7 @@ void battery_led_tick(void);
 // has been copied into interrupt_in_data. Used to detect disconnection
 // via stale-report timeout.
 void battery_led_note_report(void);
+
+// 최신 DualSense 입력 리포트에서 실제 배터리 상태를 읽는다.
+// 반환값이 false이면 최근 리포트가 없어서 값이 유효하지 않은 상태다.
+bool battery_led_get_status(uint8_t *level_percent, uint8_t *power_state, uint8_t *raw_value);

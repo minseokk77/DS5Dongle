@@ -5,6 +5,7 @@
 #include "tusb.h"
 #include "bsp/board_api.h"
 #include "config.h"
+#include "state_mgr.h"
 
 uint8_t mute[2]; // 0: SPEAKER(0x02) 1: MIC(0x05)
 float volume[2] = {-100.0f,0.0f}; // 0: SPEAKER(0x02) 1: MIC(0x05)
@@ -52,6 +53,9 @@ static bool audio10_set_req_entity(tusb_control_request_t const *p_request, uint
                         TU_VERIFY(p_request->wLength == 1);
 
                         mute[index] = pBuff[0];
+                        if (entityID == UAC1_ENTITY_MIC_FEATURE_UNIT) {
+                            state_set_mic_muted(mute[index] != 0);
+                        }
 
                         TU_LOG2("    Set Mute: %d of entity: %u\r\n", mute[index], entityID);
                         return true;

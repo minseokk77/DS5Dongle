@@ -12,6 +12,7 @@
 #include "opus.h"
 #include "utils.h"
 #include "pico/multicore.h"
+#include "pico/time.h"
 #include "pico/util/queue.h"
 #include "config.h"
 #include "state_mgr.h"
@@ -32,6 +33,7 @@ static WDL_Resampler resampler;
 static uint8_t reportSeqCounter = 0;
 static uint8_t packetCounter = 0;
 static bool plug_headset = false;
+static bool mic_active = false;
 alignas(8) static uint32_t audio_core1_stack[8192];
 queue_t audio_fifo;
 static uint8_t opus_buf[200];
@@ -43,6 +45,25 @@ struct audio_raw_element {
 
 void set_headset(bool state) {
     plug_headset = state;
+}
+
+void set_mic_active(bool state) {
+    mic_active = state;
+}
+
+void mic_loop() {
+    if (!mic_active) {
+        return;
+    }
+
+    static absolute_time_t next_frame_time = nil_time;
+    if (!is_nil_time(next_frame_time) && absolute_time_diff_us(get_absolute_time(), next_frame_time) > 0) {
+        return;
+    }
+
+    static int16_t silent_frame[48 * 2]{};
+    tud_audio_write(silent_frame, sizeof(silent_frame));
+    next_frame_time = make_timeout_time_us(1000);
 }
 
 void audio_loop() {

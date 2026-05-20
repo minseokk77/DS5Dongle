@@ -13,14 +13,13 @@
 #include "hardware/watchdog.h"
 #include "pico/cyw43_arch.h"
 #include "state_mgr.h"
+#include "usb.h"
 #if ENABLE_SERIAL
 #include "pico/stdio_usb.h"
 #endif
 #include "config.h"
 #include "cmd.h"
-#if ENABLE_BATT_LED
 #include "battery_led.h"
-#endif
 
 // Pico SDK speciifically for waiting on conditions
 #include "pico/critical_section.h"
@@ -28,6 +27,7 @@
 int reportSeqCounter = 0;
 uint8_t packetCounter = 0;
 bool spk_active = false;
+bool mute_button_was_down = false;
 
 uint8_t interrupt_in_data[63] = {
     0x7f, 0x7d, 0x7f, 0x7e, 0x00, 0x00, 0xa7,
@@ -42,6 +42,18 @@ uint8_t interrupt_in_data[63] = {
 
 critical_section_t report_cs;
 volatile bool report_dirty = false;
+
+void send_state_report() {
+    uint8_t outputData[78]{};
+    outputData[0] = 0x31;
+    outputData[1] = reportSeqCounter << 4;
+    if (++reportSeqCounter == 256) {
+        reportSeqCounter = 0;
+    }
+    outputData[2] = 0x10;
+    state_set(outputData + 3, sizeof(SetStateData));
+    bt_write(outputData, sizeof(outputData));
+}
 
 void interrupt_loop() {
     if (!tud_hid_ready()) return;
@@ -87,12 +99,20 @@ void on_bt_data(CHANNEL_TYPE channel, uint8_t *data, uint16_t len) {
         if ((data[56] & 1) != (interrupt_in_data[53] & 1)) {
             set_headset(data[56] & 1);
         }
+        const bool mute_button_down = len > 12 && (data[12] & (1 << 2)) != 0;
+        if (mute_button_down && !mute_button_was_down) {
+            const bool next_muted = !state_get_mic_muted();
+            mute[1] = next_muted ? 1 : 0;
+            state_set_mic_muted(next_muted);
+            send_state_report();
+        }
+        mute_button_was_down = mute_button_down;
 
         if (get_config().polling_rate_mode != 2) {
             memcpy(interrupt_in_data, data + 3, 63);
-#if ENABLE_BATT_LED
+            interrupt_in_data[53] = (interrupt_in_data[53] & ~(1 << 2)) |
+                                    (state_get_mic_muted() ? (1 << 2) : 0);
             battery_led_note_report();
-#endif
             return;
         }
 
@@ -104,11 +124,11 @@ void on_bt_data(CHANNEL_TYPE channel, uint8_t *data, uint16_t len) {
         //  and needs to be sent in the next interrupt report.
         critical_section_enter_blocking(&report_cs);
         memcpy(interrupt_in_data, data + 3, 63);
+        interrupt_in_data[53] = (interrupt_in_data[53] & ~(1 << 2)) |
+                                (state_get_mic_muted() ? (1 << 2) : 0);
         report_dirty = true;
         critical_section_exit(&report_cs);
-#if ENABLE_BATT_LED
         battery_led_note_report();
-#endif
     }
 }
 
@@ -143,6 +163,9 @@ bool tud_audio_set_itf_cb(uint8_t rhport, tusb_control_request_t const *p_reques
     if (itf == 1) {
         printf("[AUDIO] Set interface Speaker to alternate setting %d\n", alt);
         spk_active = alt;
+    } else if (itf == 2) {
+        printf("[AUDIO] Set interface Microphone to alternate setting %d\n", alt);
+        set_mic_active(alt != 0);
     }
 
     return true;
@@ -169,19 +192,11 @@ void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
         switch (buffer[0]) {
             case 0x02: {
                 state_update(buffer + 1, bufsize - 1);
+                mute[1] = state_get_mic_muted() ? 1 : 0;
                 if (spk_active) {
                     break;
                 }
-                uint8_t outputData[78]{};
-                outputData[0] = 0x31;
-                outputData[1] = reportSeqCounter << 4;
-                if (++reportSeqCounter == 256) {
-                    reportSeqCounter = 0;
-                }
-                outputData[2] = 0x10;
-                // memcpy(outputData + 3, buffer + 1, bufsize - 1);
-                state_set(outputData + 3,sizeof(SetStateData));
-                bt_write(outputData, sizeof(outputData));
+                send_state_report();
                 break;
             }
         }
@@ -264,6 +279,7 @@ int main() {
         cyw43_arch_poll();
         tud_task();
         audio_loop();
+        mic_loop();
         interrupt_loop();
 #if ENABLE_BATT_LED
         battery_led_tick();
