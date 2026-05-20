@@ -30,6 +30,10 @@
     Branch, tag or commit to build when cloned standalone. Empty = the
     repo's default branch.
 
+.PARAMETER FirmwareVersion
+    Firmware version string embedded into the UF2. For releases, pass the same
+    tag as the GitHub Release, for example v0.0.0.2.
+
 .EXAMPLE
     # Standalone: download just this file anywhere and run it - it clones
     # the project under %USERPROFILE%\.ds5-build and builds it.
@@ -52,7 +56,8 @@ param(
     # checkout). Override to build a fork.
     [string]$Repo = 'https://github.com/awalol/DS5Dongle.git',
     # Branch/tag/SHA to build when cloned standalone. Empty = default branch.
-    [string]$Ref = ''
+    [string]$Ref = '',
+    [string]$FirmwareVersion = 'v0.6.1-hotfix'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -459,7 +464,7 @@ if ($Clean -and (Test-Path $buildDir)) {
 $cmakeArgs = @(
     '-S', $RepoRoot, '-B', $buildDir, '-G', 'Ninja',
     '-DCMAKE_BUILD_TYPE=Release',
-    '-DVERSION=v0.6.1-hotfix',
+    "-DVERSION:STRING=$FirmwareVersion",
     "-DPICO_SDK_PATH=$SdkPath",
     "-DPython3_EXECUTABLE=$($PythonExe -replace '\\','/')"
 )
