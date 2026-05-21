@@ -17,6 +17,13 @@ struct __attribute__((packed)) Config_body {
     uint8_t polling_rate_mode; // 0: 250Hz, 1: 500Hz, 2: real-time
     uint8_t audio_buffer_length; // [16,128]
     uint8_t controller_mode; // 0: DS5, 1: DSE, 2: Auto
+    uint8_t stick_calibration_enabled; // bool
+    int8_t left_stick_center_x; // signed offset from 128
+    int8_t left_stick_center_y; // signed offset from 128
+    uint8_t left_stick_deadzone; // percent * 10, [0,80]
+    int8_t right_stick_center_x; // signed offset from 128
+    int8_t right_stick_center_y; // signed offset from 128
+    uint8_t right_stick_deadzone; // percent * 10, [0,80]
 };
 
 struct __attribute__((packed)) Config {
@@ -34,6 +41,7 @@ const Config_body& get_config();
 void set_config(const uint8_t *new_config, const uint16_t len);
 void config_valid();
 void set_config(const Config_body &new_config);
+void apply_stick_calibration(uint8_t *report);
 extern bool is_dse;
 
 #endif //DS5_BRIDGE_CONFIG_H

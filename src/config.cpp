@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 
 #include "utils.h"
 #include "hardware/flash.h"
@@ -13,7 +14,7 @@
 #include "pico/cyw43_arch.h"
 
 constexpr uint32_t CONFIG_MAGIC = 0x66ccff00;
-constexpr uint16_t CONFIG_VERSION = 1;
+constexpr uint16_t CONFIG_VERSION = 2;
 constexpr uint32_t CONFIG_FLASH_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 static Config config{};
 bool is_dse = false;
@@ -23,6 +24,16 @@ bool is_dse = false;
 static_assert(sizeof(Config) <= FLASH_PAGE_SIZE);
 // 配置区起始地址必须按 flash sector 对齐。
 static_assert(CONFIG_FLASH_OFFSET % FLASH_SECTOR_SIZE == 0);
+
+void default_stick_calibration(Config_body *body) {
+    body->stick_calibration_enabled = 0;
+    body->left_stick_center_x = 0;
+    body->left_stick_center_y = 0;
+    body->left_stick_deadzone = 10;
+    body->right_stick_center_x = 0;
+    body->right_stick_center_y = 0;
+    body->right_stick_deadzone = 10;
+}
 
 uint32_t calc_config_crc(const Config &con) {
     return crc32(reinterpret_cast<const uint8_t *>(&con.body), sizeof(Config_body));
@@ -34,16 +45,20 @@ const Config *flash_config() {
 
 void config_valid() {
     // valid config and set default value
+    bool migrated = false;
     if (config.magic != CONFIG_MAGIC) {
         config.magic = CONFIG_MAGIC;
+        migrated = true;
         printf("[Config] Config Magic Header is invalid\n");
     }
     if (config.version != CONFIG_VERSION) {
         config.version = CONFIG_VERSION;
+        migrated = true;
         printf("[Config] Config Version is invalid\n");
     }
     if (config.size != sizeof(Config_body)) {
         config.size = sizeof(Config_body);
+        migrated = true;
         printf("[Config] Config Body size is invalid\n");
     }
     auto body = &config.body;
@@ -81,7 +96,23 @@ void config_valid() {
     }
     if (body->config_version != CONFIG_VERSION) {
         body->config_version = CONFIG_VERSION;
+        migrated = true;
         printf("[Config] Warning: Config may breaking change\n");
+    }
+    if (migrated) {
+        default_stick_calibration(body);
+    }
+    if (body->stick_calibration_enabled > 1) {
+        body->stick_calibration_enabled = 0;
+        printf("[Config] stick_calibration_enabled is invalid\n");
+    }
+    if (body->left_stick_deadzone > 80) {
+        body->left_stick_deadzone = 10;
+        printf("[Config] left_stick_deadzone is invalid\n");
+    }
+    if (body->right_stick_deadzone > 80) {
+        body->right_stick_deadzone = 10;
+        printf("[Config] right_stick_deadzone is invalid\n");
     }
 }
 
@@ -131,4 +162,42 @@ void set_config(const uint8_t *new_config, const uint16_t len) {
 void set_config(const Config_body &new_config) {
     config.body = new_config;
     config_valid();
+}
+
+static uint8_t apply_axis_calibration(uint8_t raw, int8_t center_offset, uint8_t deadzone_tenths) {
+    const int center = 128 + static_cast<int>(center_offset);
+    int value = static_cast<int>(raw) - center;
+    const int deadzone = static_cast<int>(deadzone_tenths) * 127 / 1000;
+
+    if (std::abs(value) <= deadzone) {
+        return 128;
+    }
+
+    const int range = 127 - deadzone;
+    if (range <= 0) {
+        return 128;
+    }
+
+    if (value > 0) {
+        value = (value - deadzone) * 127 / range;
+    } else {
+        value = (value + deadzone) * 127 / range;
+    }
+
+    const int corrected = 128 + value;
+    if (corrected < 0) return 0;
+    if (corrected > 255) return 255;
+    return static_cast<uint8_t>(corrected);
+}
+
+void apply_stick_calibration(uint8_t *report) {
+    const auto &body = get_config();
+    if (!body.stick_calibration_enabled || report == nullptr) {
+        return;
+    }
+
+    report[0] = apply_axis_calibration(report[0], body.left_stick_center_x, body.left_stick_deadzone);
+    report[1] = apply_axis_calibration(report[1], body.left_stick_center_y, body.left_stick_deadzone);
+    report[2] = apply_axis_calibration(report[2], body.right_stick_center_x, body.right_stick_deadzone);
+    report[3] = apply_axis_calibration(report[3], body.right_stick_center_y, body.right_stick_deadzone);
 }

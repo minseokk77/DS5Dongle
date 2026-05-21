@@ -110,6 +110,7 @@ void on_bt_data(CHANNEL_TYPE channel, uint8_t *data, uint16_t len) {
 
         if (get_config().polling_rate_mode != 2) {
             memcpy(interrupt_in_data, data + 3, 63);
+            apply_stick_calibration(interrupt_in_data);
             interrupt_in_data[53] = (interrupt_in_data[53] & ~(1 << 2)) |
                                     (state_get_mic_muted() ? (1 << 2) : 0);
             battery_led_note_report();
@@ -124,6 +125,7 @@ void on_bt_data(CHANNEL_TYPE channel, uint8_t *data, uint16_t len) {
         //  and needs to be sent in the next interrupt report.
         critical_section_enter_blocking(&report_cs);
         memcpy(interrupt_in_data, data + 3, 63);
+        apply_stick_calibration(interrupt_in_data);
         interrupt_in_data[53] = (interrupt_in_data[53] & ~(1 << 2)) |
                                 (state_get_mic_muted() ? (1 << 2) : 0);
         report_dirty = true;
