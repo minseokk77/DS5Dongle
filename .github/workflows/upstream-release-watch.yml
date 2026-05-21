@@ -1,0 +1,42 @@
+name: Watch upstream firmware releases
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check latest upstream release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          latest_tag="$(gh api repos/awalol/DS5Dongle/releases/latest --jq '.tag_name')"
+          if [ -z "$latest_tag" ]; then
+            echo "No upstream release tag found."
+            exit 0
+          fi
+
+          title="Upstream DS5Dongle release detected: ${latest_tag}"
+          existing_count="$(gh issue list --state open --search "${title} in:title" --json number --jq 'length')"
+          if [ "$existing_count" != "0" ]; then
+            echo "Issue already exists for ${latest_tag}."
+            exit 0
+          fi
+
+          gh issue create \
+            --title "$title" \
+            --body "공식 DS5Dongle 새 릴리즈가 감지되었습니다: https://github.com/awalol/DS5Dongle/releases/tag/${latest_tag}
+
+          확인할 항목:
+          - 커스텀 펌웨어 변경분을 새 공식 버전에 다시 적용
+          - 펌웨어 내부 버전과 앱 릴리즈 태그 정렬
+          - DS5 Dongle Config에서 업데이트/보정/입력 테스트 실기기 확인"

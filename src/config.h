@@ -24,6 +24,14 @@ struct __attribute__((packed)) Config_body {
     int8_t right_stick_center_x; // signed offset from 128
     int8_t right_stick_center_y; // signed offset from 128
     uint8_t right_stick_deadzone; // percent * 10, [0,80]
+    int8_t left_stick_min_x; // signed reach from center, [-127,0]
+    int8_t left_stick_max_x; // signed reach from center, [0,127]
+    int8_t left_stick_min_y; // signed reach from center, [-127,0]
+    int8_t left_stick_max_y; // signed reach from center, [0,127]
+    int8_t right_stick_min_x; // signed reach from center, [-127,0]
+    int8_t right_stick_max_x; // signed reach from center, [0,127]
+    int8_t right_stick_min_y; // signed reach from center, [-127,0]
+    int8_t right_stick_max_y; // signed reach from center, [0,127]
 };
 
 struct __attribute__((packed)) Config {

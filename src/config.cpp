@@ -14,7 +14,7 @@
 #include "pico/cyw43_arch.h"
 
 constexpr uint32_t CONFIG_MAGIC = 0x66ccff00;
-constexpr uint16_t CONFIG_VERSION = 2;
+constexpr uint16_t CONFIG_VERSION = 3;
 constexpr uint32_t CONFIG_FLASH_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 static Config config{};
 bool is_dse = false;
@@ -35,6 +35,17 @@ void default_stick_calibration(Config_body *body) {
     body->right_stick_deadzone = 10;
 }
 
+void default_directional_stick_calibration(Config_body *body) {
+    body->left_stick_min_x = -127;
+    body->left_stick_max_x = 127;
+    body->left_stick_min_y = -127;
+    body->left_stick_max_y = 127;
+    body->right_stick_min_x = -127;
+    body->right_stick_max_x = 127;
+    body->right_stick_min_y = -127;
+    body->right_stick_max_y = 127;
+}
+
 uint32_t calc_config_crc(const Config &con) {
     return crc32(reinterpret_cast<const uint8_t *>(&con.body), sizeof(Config_body));
 }
@@ -45,20 +56,23 @@ const Config *flash_config() {
 
 void config_valid() {
     // valid config and set default value
-    bool migrated = false;
+    bool reset_all_stick_calibration = false;
+    bool reset_directional_calibration = false;
+    const uint16_t previous_body_size = config.size;
+    const uint8_t previous_body_version = config.body.config_version;
     if (config.magic != CONFIG_MAGIC) {
         config.magic = CONFIG_MAGIC;
-        migrated = true;
+        reset_all_stick_calibration = true;
         printf("[Config] Config Magic Header is invalid\n");
     }
     if (config.version != CONFIG_VERSION) {
         config.version = CONFIG_VERSION;
-        migrated = true;
+        reset_directional_calibration = true;
         printf("[Config] Config Version is invalid\n");
     }
     if (config.size != sizeof(Config_body)) {
         config.size = sizeof(Config_body);
-        migrated = true;
+        reset_directional_calibration = previous_body_size < sizeof(Config_body);
         printf("[Config] Config Body size is invalid\n");
     }
     auto body = &config.body;
@@ -96,11 +110,14 @@ void config_valid() {
     }
     if (body->config_version != CONFIG_VERSION) {
         body->config_version = CONFIG_VERSION;
-        migrated = true;
+        reset_directional_calibration = previous_body_version < CONFIG_VERSION;
         printf("[Config] Warning: Config may breaking change\n");
     }
-    if (migrated) {
+    if (reset_all_stick_calibration) {
         default_stick_calibration(body);
+        default_directional_stick_calibration(body);
+    } else if (reset_directional_calibration) {
+        default_directional_stick_calibration(body);
     }
     if (body->stick_calibration_enabled > 1) {
         body->stick_calibration_enabled = 0;
@@ -114,6 +131,14 @@ void config_valid() {
         body->right_stick_deadzone = 10;
         printf("[Config] right_stick_deadzone is invalid\n");
     }
+    if (body->left_stick_min_x >= 0 || body->left_stick_min_x < -127) body->left_stick_min_x = -127;
+    if (body->left_stick_max_x <= 0 || body->left_stick_max_x > 127) body->left_stick_max_x = 127;
+    if (body->left_stick_min_y >= 0 || body->left_stick_min_y < -127) body->left_stick_min_y = -127;
+    if (body->left_stick_max_y <= 0 || body->left_stick_max_y > 127) body->left_stick_max_y = 127;
+    if (body->right_stick_min_x >= 0 || body->right_stick_min_x < -127) body->right_stick_min_x = -127;
+    if (body->right_stick_max_x <= 0 || body->right_stick_max_x > 127) body->right_stick_max_x = 127;
+    if (body->right_stick_min_y >= 0 || body->right_stick_min_y < -127) body->right_stick_min_y = -127;
+    if (body->right_stick_max_y <= 0 || body->right_stick_max_y > 127) body->right_stick_max_y = 127;
 }
 
 void config_load() {
@@ -164,7 +189,7 @@ void set_config(const Config_body &new_config) {
     config_valid();
 }
 
-static uint8_t apply_axis_calibration(uint8_t raw, int8_t center_offset, uint8_t deadzone_tenths) {
+static uint8_t apply_axis_calibration(uint8_t raw, int8_t center_offset, uint8_t deadzone_tenths, int8_t min_reach, int8_t max_reach) {
     const int center = 128 + static_cast<int>(center_offset);
     int value = static_cast<int>(raw) - center;
     const int deadzone = static_cast<int>(deadzone_tenths) * 127 / 1000;
@@ -173,7 +198,8 @@ static uint8_t apply_axis_calibration(uint8_t raw, int8_t center_offset, uint8_t
         return 128;
     }
 
-    const int range = 127 - deadzone;
+    const int reach = value > 0 ? static_cast<int>(max_reach) : -static_cast<int>(min_reach);
+    const int range = reach - deadzone;
     if (range <= 0) {
         return 128;
     }
@@ -196,8 +222,8 @@ void apply_stick_calibration(uint8_t *report) {
         return;
     }
 
-    report[0] = apply_axis_calibration(report[0], body.left_stick_center_x, body.left_stick_deadzone);
-    report[1] = apply_axis_calibration(report[1], body.left_stick_center_y, body.left_stick_deadzone);
-    report[2] = apply_axis_calibration(report[2], body.right_stick_center_x, body.right_stick_deadzone);
-    report[3] = apply_axis_calibration(report[3], body.right_stick_center_y, body.right_stick_deadzone);
+    report[0] = apply_axis_calibration(report[0], body.left_stick_center_x, body.left_stick_deadzone, body.left_stick_min_x, body.left_stick_max_x);
+    report[1] = apply_axis_calibration(report[1], body.left_stick_center_y, body.left_stick_deadzone, body.left_stick_min_y, body.left_stick_max_y);
+    report[2] = apply_axis_calibration(report[2], body.right_stick_center_x, body.right_stick_deadzone, body.right_stick_min_x, body.right_stick_max_x);
+    report[3] = apply_axis_calibration(report[3], body.right_stick_center_y, body.right_stick_deadzone, body.right_stick_min_y, body.right_stick_max_y);
 }
