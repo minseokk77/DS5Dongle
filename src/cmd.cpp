@@ -20,8 +20,7 @@ bool is_pico_cmd(uint8_t report_id) {
         report_id == 0xf7 ||
         report_id == 0xf5 ||
         report_id == 0xf8 ||
-        report_id == 0xf9 ||
-        report_id == 0xfa
+        report_id == 0xf9
     ) {
         return true;
     }
@@ -71,36 +70,6 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
         printf("[HID] 0xf5 battery=%u state=0x%02X raw=0x%02X\n", level, state, raw);
 #endif
         return 3;
-    }
-    if (report_id == 0xfa) {
-        if (reqlen < 8) {
-            return 0;
-        }
-        constexpr uint32_t FEATURE_BATTERY = 1u << 0;
-        constexpr uint32_t FEATURE_RSSI = 1u << 1;
-        constexpr uint32_t FEATURE_VIBRATION_TEST = 1u << 2;
-        constexpr uint32_t FEATURE_ADAPTIVE_TRIGGER = 1u << 3;
-        constexpr uint32_t FEATURE_BOOTLOADER_COMMAND = 1u << 4;
-        constexpr uint32_t FEATURE_STICK_CALIBRATION = 1u << 5;
-        constexpr uint32_t FEATURE_DIRECTIONAL_STICK_CALIBRATION = 1u << 6;
-        constexpr uint32_t features =
-            FEATURE_BATTERY |
-            FEATURE_RSSI |
-            FEATURE_VIBRATION_TEST |
-            FEATURE_ADAPTIVE_TRIGGER |
-            FEATURE_BOOTLOADER_COMMAND |
-            FEATURE_STICK_CALIBRATION |
-            FEATURE_DIRECTIONAL_STICK_CALIBRATION;
-
-        buffer[0] = 1; // Capability report protocol version.
-        buffer[1] = get_config().config_version;
-        buffer[2] = sizeof(Config_body) & 0xff;
-        buffer[3] = (sizeof(Config_body) >> 8) & 0xff;
-        buffer[4] = features & 0xff;
-        buffer[5] = (features >> 8) & 0xff;
-        buffer[6] = (features >> 16) & 0xff;
-        buffer[7] = (features >> 24) & 0xff;
-        return 8;
     }
     return 0;
 }
