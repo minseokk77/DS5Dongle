@@ -59,11 +59,23 @@ bool battery_led_get_status(uint8_t *level_percent, uint8_t *power_state, uint8_
     return true;
 }
 
+void battery_led_on_disconnect(void) {
+    blinking = false;
+    led_state = false;
+    last_report_us = 0;
+    last_toggle_us = 0;
+    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
+}
+
 void battery_led_tick(void) {
     const uint64_t now = time_us_64();
     if (last_report_us == 0 || (now - last_report_us) >= REPORT_STALE_US) {
-        // No fresh data — bt.cpp owns the LED while disconnected.
-        blinking = false;
+        // No fresh data: force off if a blink was active, then wait for a fresh report.
+        if (blinking) {
+            blinking = false;
+            led_state = false;
+            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
+        }
         return;
     }
 

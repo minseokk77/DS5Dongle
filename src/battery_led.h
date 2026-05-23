@@ -19,6 +19,11 @@ void battery_led_tick(void);
 // via stale-report timeout.
 void battery_led_note_report(void);
 
+// Call from the BT disconnect handler. Cancels any in-progress blink,
+// forces the LED off, and ignores cached battery data until a fresh
+// report arrives on the next connection.
+void battery_led_on_disconnect(void);
+
 // 최신 DualSense 입력 리포트에서 실제 배터리 상태를 읽는다.
 // 반환값이 false이면 최근 리포트가 없어서 값이 유효하지 않은 상태다.
 bool battery_led_get_status(uint8_t *level_percent, uint8_t *power_state, uint8_t *raw_value);
