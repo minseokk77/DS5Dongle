@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "DS5 Dongle Config",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "identifier": "local.ds5.bridge.config",
   "build": {
     "beforeBuildCommand": "pnpm build",
@@ -11,8 +11,8 @@
     "windows": [
       {
         "title": "DS5 Dongle Config",
-        "width": 1020,
-        "height": 660,
+        "width": 1005,
+        "height": 675,
         "minWidth": 900,
         "minHeight": 620,
         "resizable": true,
