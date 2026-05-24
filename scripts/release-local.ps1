@@ -66,23 +66,8 @@ try {
     throw "업로드할 릴리즈 에셋을 찾지 못했습니다."
   }
 
-  $releaseExists = $true
-  $previousNativeErrorPreference = $null
-  if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -ErrorAction SilentlyContinue) {
-    $previousNativeErrorPreference = $Global:PSNativeCommandUseErrorActionPreference
-    $Global:PSNativeCommandUseErrorActionPreference = $false
-  }
-  try {
-    gh release view $Tag --repo $Repository *> $null
-    if ($LASTEXITCODE -ne 0) {
-      $releaseExists = $false
-    }
-  }
-  finally {
-    if ($null -ne $previousNativeErrorPreference) {
-      $Global:PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
-    }
-  }
+  $releaseTags = @(gh release list --repo $Repository --limit 100 --json tagName --jq '.[].tagName')
+  $releaseExists = $releaseTags -contains $Tag
 
   if (-not $releaseExists) {
     gh release create $Tag --repo $Repository --title $Tag --notes "로컬 빌드 릴리즈입니다. GitHub Actions는 사용하지 않습니다."
