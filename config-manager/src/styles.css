@@ -537,10 +537,22 @@ input[type="checkbox"]:checked::after { transform: translateX(14px); }
 .update-step-card.done span {
   background: #63e2b7;
   box-shadow: 0 0 14px rgba(99, 226, 183, 0.42);
+  color: #07140f;
+  display: grid;
+  place-items: center;
+  font-size: 0.58rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.update-step-card.done {
+  border-color: rgba(99, 226, 183, 0.24);
+  background: color-mix(in srgb, #63e2b7 10%, var(--control));
 }
 
 .update-step-card.active {
   border-color: rgba(47, 107, 255, 0.7);
+  background: color-mix(in srgb, #2f6bff 10%, var(--control));
 }
 
 .update-step-card.active span {

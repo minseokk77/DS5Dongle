@@ -339,6 +339,12 @@
     return order.map((step, index) => ({
       step,
       label: text.updateSteps[step],
+      marker:
+        updateStep === 'failed' || updateStep === 'latest'
+          ? ''
+          : index < activeIndex || updateStep === 'done'
+            ? '✓'
+            : '',
       state:
         updateStep === 'failed' || updateStep === 'latest'
           ? 'waiting'
@@ -1054,8 +1060,8 @@
         </div>
         <div class="update-step-grid">
           {#each updateStepItems as item}
-            <div class={`update-step-card ${item.state}`}>
-              <span></span>
+            <div class:done={item.state === 'done'} class:active={item.state === 'active'} class="update-step-card">
+              <span>{item.marker}</span>
               <strong>{item.label}</strong>
             </div>
           {/each}

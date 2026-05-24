@@ -91,7 +91,7 @@ function Update-ProjectVersionFiles {
 
   Set-TextFileUtf8 $appPath ((Get-Content -Raw -Encoding UTF8 $appPath) -replace "const appVersion = '[^']+';", "const appVersion = '$ReleaseVersion';")
   Set-TextFileUtf8 $packagePath ((Get-Content -Raw -Encoding UTF8 $packagePath) -replace '"version":\s*"[^"]+"', """version"": ""$BundleVersion""")
-  Set-TextFileUtf8 $cargoPath ((Get-Content -Raw -Encoding UTF8 $cargoPath) -replace 'version\s*=\s*"[^"]+"', "version = ""$BundleVersion""")
+  Set-TextFileUtf8 $cargoPath ((Get-Content -Raw -Encoding UTF8 $cargoPath) -replace '(?m)^version\s*=\s*"[^"]+"', "version = ""$BundleVersion""")
   Set-TextFileUtf8 $cargoLockPath ((Get-Content -Raw -Encoding UTF8 $cargoLockPath) -replace '(name = "ds5-bridge-config-tauri"\s+version = )"[^"]+"', "`${1}""$BundleVersion""")
   Set-TextFileUtf8 $tauriConfigPath ((Get-Content -Raw -Encoding UTF8 $tauriConfigPath) -replace '"version":\s*"[^"]+"', """version"": ""$BundleVersion""")
 }
