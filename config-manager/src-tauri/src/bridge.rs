@@ -83,6 +83,7 @@ pub struct FirmwareCapabilities {
     pub config_version: u8,
     pub config_body_length: u8,
     pub build_channel: Option<String>,
+    pub controller_connected: Option<bool>,
     pub feature_flags: u32,
     pub supports_battery: bool,
     pub supports_rssi: bool,
@@ -171,9 +172,13 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     let rssi_val = rssi_result.as_ref().ok().and_then(|v| *v);
     let battery_report_available = battery_level.is_some();
     let rssi_report_available = rssi_val.is_some();
-    // RSSI 리포트는 Pico만 연결된 상태에서도 0 dBm처럼 보일 수 있습니다.
-    // DualSense 연결 UI는 실제 컨트롤러 상태를 나타내야 하므로 배터리 리포트 수신 여부로 판정합니다.
-    let controller_connected = battery_report_available;
+    // 새 펌웨어는 기능 리포트에서 BT HID 채널 연결 상태를 직접 반환합니다.
+    // 구버전에서는 배터리 리포트 수신 여부를 컨트롤러 연결의 보수적인 대체 신호로 사용합니다.
+    let controller_connected = capabilities_result
+        .as_ref()
+        .ok()
+        .and_then(|capabilities| capabilities.controller_connected)
+        .unwrap_or(battery_report_available);
     let config_readable = read_config(device_id).is_ok();
 
     let manufacturer = device
@@ -589,16 +594,9 @@ fn read_capabilities_from_device(
     }
 
     let feature_flags = u32::from_le_bytes(payload[8..12].try_into().unwrap());
-    let build_channel = payload.get(12).and_then(|length| {
-        let start = 13;
-        let end = start + usize::from(*length);
-        payload
-            .get(start..end)
-            .and_then(|bytes| std::str::from_utf8(bytes).ok())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-    });
+    let new_build_channel = read_capability_string(payload, 13, 14);
+    let controller_connected = new_build_channel.as_ref().map(|_| payload[12] & 0x01 != 0);
+    let build_channel = new_build_channel.or_else(|| read_capability_string(payload, 12, 13));
     let protocol_version = payload[4];
     let config_version = payload[5];
     let config_body_length = payload[6];
@@ -619,6 +617,7 @@ fn read_capabilities_from_device(
         config_version,
         config_body_length,
         build_channel,
+        controller_connected,
         feature_flags,
         supports_battery: feature_flags & (1 << 0) != 0,
         supports_rssi: feature_flags & (1 << 1) != 0,
@@ -628,6 +627,17 @@ fn read_capabilities_from_device(
         supports_stick_calibration: feature_flags & (1 << 5) != 0,
         supports_directional_stick_calibration: feature_flags & (1 << 6) != 0,
     })
+}
+
+fn read_capability_string(payload: &[u8], length_offset: usize, value_offset: usize) -> Option<String> {
+    let length = usize::from(*payload.get(length_offset)?);
+    let end = value_offset.checked_add(length)?;
+    payload
+        .get(value_offset..end)
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn read_i8_scaled(bytes: &[u8], offset: usize, scale: f32) -> Option<f32> {

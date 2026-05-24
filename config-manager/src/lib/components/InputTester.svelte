@@ -7,6 +7,7 @@
   type StickDeadzone = { up: number; down: number; left: number; right: number };
   type StickSample = { x: number; y: number };
   type CalibrationPhase = 'idle' | 'neutral' | 'rotate' | 'done' | 'warning';
+  type CalibrationQuality = 'good' | 'fair' | 'unstable';
 
   interface FirmwareCapability {
     key: string;
@@ -26,6 +27,8 @@
     minY: number;
     maxY: number;
     recommended: StickDeadzone;
+    quality: CalibrationQuality;
+    qualityScore: number;
     message: string;
   }
 
@@ -118,6 +121,8 @@
       minY: -1,
       maxY: 1,
       recommended: { ...defaultDeadzone },
+      quality: 'fair',
+      qualityScore: 0,
       message: ''
     };
   }
@@ -327,6 +332,11 @@
       right: roundPercent(Math.max(base, Math.abs(maxX - center.x) < 0.3 ? 8 : base))
     };
     const warning = neutralNoisePercent + 0.4 > 8 || maxRadius < 60;
+    const coveragePenalty = Math.max(0, 95 - maxRadius) * 0.7;
+    const noisePenalty = neutralNoisePercent * 7;
+    const deadzonePenalty = Math.max(0, base - 1) * 5;
+    const qualityScore = Math.round(Math.max(0, Math.min(100, 100 - coveragePenalty - noisePenalty - deadzonePenalty)));
+    const quality: CalibrationQuality = warning ? 'unstable' : qualityScore >= 80 ? 'good' : 'fair';
 
     return {
       phase: warning ? 'warning' : 'done',
@@ -339,8 +349,21 @@
       minY,
       maxY,
       recommended,
+      quality,
+      qualityScore,
       message: warning ? text.calibrationWarning : text.calibrationDone
     } satisfies CalibrationResult;
+  }
+
+  function calibrationQualityText(result: CalibrationResult) {
+    if (result.phase === 'idle') return text.calibrationNoInfo;
+    const label =
+      result.quality === 'good'
+        ? text.calibrationQualityGood
+        : result.quality === 'fair'
+          ? text.calibrationQualityFair
+          : text.calibrationQualityUnstable;
+    return `${label} · ${result.qualityScore}/100`;
   }
 
   function roundPercent(value: number) {
@@ -573,6 +596,7 @@
               <span>{text.calibrationRadius}</span><b>{leftCalibration.maxRadius.toFixed(1)}%</b>
               <span>{text.calibrationReach}</span><b>X {leftCalibration.minX.toFixed(2)}~{leftCalibration.maxX.toFixed(2)} / Y {leftCalibration.minY.toFixed(2)}~{leftCalibration.maxY.toFixed(2)}</b>
               <span>{text.deadzone}</span><b>{leftDeadzoneThreshold.up.toFixed(1)}%</b>
+              <span>{text.calibrationQuality}</span><b>{calibrationQualityText(leftCalibration)}</b>
             </div>
             <div class="button-row">
               <button type="button" disabled={!isConnected || Boolean(calibratingSide)} onclick={() => startCalibration('left')}>{text.startCalibration}</button>
@@ -589,6 +613,7 @@
               <span>{text.calibrationRadius}</span><b>{rightCalibration.maxRadius.toFixed(1)}%</b>
               <span>{text.calibrationReach}</span><b>X {rightCalibration.minX.toFixed(2)}~{rightCalibration.maxX.toFixed(2)} / Y {rightCalibration.minY.toFixed(2)}~{rightCalibration.maxY.toFixed(2)}</b>
               <span>{text.deadzone}</span><b>{rightDeadzoneThreshold.up.toFixed(1)}%</b>
+              <span>{text.calibrationQuality}</span><b>{calibrationQualityText(rightCalibration)}</b>
             </div>
             <div class="button-row">
               <button type="button" disabled={!isConnected || Boolean(calibratingSide)} onclick={() => startCalibration('right')}>{text.startCalibration}</button>

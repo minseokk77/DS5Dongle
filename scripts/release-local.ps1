@@ -1,6 +1,5 @@
 ﻿param(
-  [Parameter(Mandatory = $true)]
-  [string]$Tag,
+  [string]$Tag = "",
 
   [string]$Repository = "minseokk77/DS5Dongle",
 
@@ -28,6 +27,100 @@ $configManager = Join-Path $repoRoot "config-manager"
 
 if (-not (Test-Path -LiteralPath $configManager)) {
   throw "config-manager 폴더를 찾지 못했습니다."
+}
+
+function Get-NextReleaseTag {
+  param([string]$Repository)
+
+  $tags = @()
+  try {
+    $tags += @(gh release list --repo $Repository --limit 100 --json tagName --jq '.[].tagName')
+  } catch {
+    Write-Host "GitHub 릴리즈 목록을 읽지 못해 로컬 태그만 사용합니다."
+  }
+  $tags += @(git tag --list "v0.0.*.*")
+  $latest = $tags |
+    Where-Object { $_ -match '^v0\.0\.(\d+)\.(\d+)$' } |
+    Sort-Object {
+      if ($_ -match '^v0\.0\.(\d+)\.(\d+)$') {
+        ([int]$Matches[1] * 100000) + [int]$Matches[2]
+      } else {
+        0
+      }
+    } -Descending |
+    Select-Object -First 1
+
+  if (-not $latest -or $latest -notmatch '^v0\.0\.(\d+)\.(\d+)$') {
+    return "v0.0.1.0"
+  }
+
+  return "v0.0.$($Matches[1]).$([int]$Matches[2] + 1)"
+}
+
+function Get-BundleVersionFromRelease {
+  param([string]$ReleaseVersion)
+
+  if ($ReleaseVersion -notmatch '^0\.0\.(\d+)\.(\d+)$') {
+    throw "릴리즈 버전은 0.0.x.x 형식이어야 합니다."
+  }
+
+  return "0.0.$($Matches[1])$($Matches[2])"
+}
+
+function Set-TextFileUtf8 {
+  param(
+    [string]$Path,
+    [string]$Content
+  )
+
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+}
+
+function Update-ProjectVersionFiles {
+  param(
+    [string]$ReleaseVersion,
+    [string]$BundleVersion
+  )
+
+  $appPath = Join-Path $configManager "src\App.svelte"
+  $packagePath = Join-Path $configManager "package.json"
+  $cargoPath = Join-Path $configManager "src-tauri\Cargo.toml"
+  $cargoLockPath = Join-Path $configManager "src-tauri\Cargo.lock"
+  $tauriConfigPath = Join-Path $configManager "src-tauri\tauri.conf.json"
+
+  Set-TextFileUtf8 $appPath ((Get-Content -Raw -Encoding UTF8 $appPath) -replace "const appVersion = '[^']+';", "const appVersion = '$ReleaseVersion';")
+  Set-TextFileUtf8 $packagePath ((Get-Content -Raw -Encoding UTF8 $packagePath) -replace '"version":\s*"[^"]+"', """version"": ""$BundleVersion""")
+  Set-TextFileUtf8 $cargoPath ((Get-Content -Raw -Encoding UTF8 $cargoPath) -replace 'version\s*=\s*"[^"]+"', "version = ""$BundleVersion""")
+  Set-TextFileUtf8 $cargoLockPath ((Get-Content -Raw -Encoding UTF8 $cargoLockPath) -replace '(name = "ds5-bridge-config-tauri"\s+version = )"[^"]+"', "`${1}""$BundleVersion""")
+  Set-TextFileUtf8 $tauriConfigPath ((Get-Content -Raw -Encoding UTF8 $tauriConfigPath) -replace '"version":\s*"[^"]+"', """version"": ""$BundleVersion""")
+}
+
+if (-not $Tag) {
+  $preBumpDirty = git status --porcelain
+  if ($preBumpDirty) {
+    throw "자동 버전 증가 전 작업 트리가 깨끗해야 합니다. 먼저 커밋하거나 되돌리세요."
+  }
+
+  $Tag = Get-NextReleaseTag -Repository $Repository
+  $releaseVersionForBump = $Tag.TrimStart("v")
+  $bundleVersionForBump = Get-BundleVersionFromRelease -ReleaseVersion $releaseVersionForBump
+  Update-ProjectVersionFiles -ReleaseVersion $releaseVersionForBump -BundleVersion $bundleVersionForBump
+  Push-Location $repoRoot
+  try {
+    $versionFiles = @(
+      (Join-Path $configManager "src\App.svelte"),
+      (Join-Path $configManager "package.json"),
+      (Join-Path $configManager "src-tauri\Cargo.toml"),
+      (Join-Path $configManager "src-tauri\Cargo.lock"),
+      (Join-Path $configManager "src-tauri\tauri.conf.json")
+    )
+    git add @versionFiles
+    git commit -m "Bump version to $releaseVersionForBump"
+  }
+  finally {
+    Pop-Location
+  }
 }
 
 if ($Tag -notmatch '^v0\.0\.\d+\.\d+$') {
@@ -133,6 +226,7 @@ try {
     if ($stagedName -notlike "*$releaseVersion*") {
       $stagedName = $stagedName -replace '\d+\.\d+\.\d+(?:\.\d+)?', $releaseVersion
     }
+    $stagedName = $stagedName -replace '\s+', '.'
     $stagedPath = Join-Path $assetStage $stagedName
     Copy-Item -LiteralPath $asset.FullName -Destination $stagedPath -Force
     $assets += $stagedPath

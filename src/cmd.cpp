@@ -82,9 +82,10 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
             static_cast<uint8_t>((FEATURE_FLAGS >> 16) & 0xff),
             static_cast<uint8_t>((FEATURE_FLAGS >> 24) & 0xff),
         };
-        const auto channel_len = std::min(strlen(BUILD_CHANNEL), sizeof(capabilities) - 13);
-        capabilities[12] = static_cast<uint8_t>(channel_len);
-        memcpy(capabilities + 13, BUILD_CHANNEL, channel_len);
+        capabilities[12] = bt_is_controller_connected() ? 1 : 0;
+        const auto channel_len = std::min(strlen(BUILD_CHANNEL), sizeof(capabilities) - 14);
+        capabilities[13] = static_cast<uint8_t>(channel_len);
+        memcpy(capabilities + 14, BUILD_CHANNEL, channel_len);
         const auto len = std::min(sizeof(capabilities), static_cast<size_t>(reqlen));
         memcpy(buffer, capabilities, len);
         return len;

@@ -62,6 +62,7 @@ export interface FirmwareCapabilities {
   config_version: number;
   config_body_length: number;
   build_channel?: string | null;
+  controller_connected?: boolean | null;
   feature_flags: number;
   supports_battery: boolean;
   supports_rssi: boolean;
