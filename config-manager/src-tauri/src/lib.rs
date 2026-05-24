@@ -40,6 +40,7 @@ pub fn run() {
             commands::list_devices,
             commands::read_config,
             commands::read_device_info,
+            commands::read_capabilities,
             commands::apply_config,
             commands::save_config,
             commands::reconnect_usb,

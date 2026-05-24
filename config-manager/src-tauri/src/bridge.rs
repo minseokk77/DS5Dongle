@@ -61,14 +61,35 @@ pub struct BridgeConfig {
 pub struct DeviceInfo {
     pub firmware_version: Option<String>,
     pub rssi: Option<i8>,
+    pub capabilities: Option<FirmwareCapabilities>,
     pub firmware_error: Option<String>,
     pub rssi_error: Option<String>,
+    pub capabilities_error: Option<String>,
     pub usb_vendor_name: String,
     pub usb_speed_class: String,
     pub rssi_strength_label: String,
     pub battery_level: Option<u8>,
     pub is_charging: Option<bool>,
+    pub dongle_connected: bool,
     pub controller_connected: bool,
+    pub battery_report_available: bool,
+    pub rssi_report_available: bool,
+    pub config_readable: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FirmwareCapabilities {
+    pub protocol_version: u8,
+    pub config_version: u8,
+    pub config_body_length: u8,
+    pub feature_flags: u32,
+    pub supports_battery: bool,
+    pub supports_rssi: bool,
+    pub supports_vibration_test: bool,
+    pub supports_adaptive_trigger: bool,
+    pub supports_bootloader_command: bool,
+    pub supports_stick_calibration: bool,
+    pub supports_directional_stick_calibration: bool,
 }
 
 #[derive(Debug, Error)]
@@ -143,9 +164,14 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     let device = open_device(device_id)?;
 
     let firmware_result = read_feature_string(&device, settings.reports.firmware_version);
+    let capabilities_result = read_capabilities_from_device(&device, settings.reports.capabilities);
     let rssi_result = read_rssi(&device, settings.reports.rssi);
     let (battery_level, is_charging) = read_battery(&device, settings.reports.battery);
-    let controller_connected = battery_level.is_some() || rssi_result.as_ref().ok().and_then(|v| *v).is_some();
+    let rssi_val = rssi_result.as_ref().ok().and_then(|v| *v);
+    let battery_report_available = battery_level.is_some();
+    let rssi_report_available = rssi_val.is_some();
+    let controller_connected = battery_report_available || rssi_report_available;
+    let config_readable = read_config(device_id).is_ok();
 
     let manufacturer = device
         .get_manufacturer_string()
@@ -156,7 +182,6 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
         .unwrap_or_else(|_| Some("Wireless Controller / Dongle".to_string()))
         .unwrap_or_else(|| "Wireless Controller / Dongle".to_string());
 
-    let rssi_val = rssi_result.as_ref().ok().and_then(|v| *v);
     let rssi_strength_label = match rssi_val {
         Some(r) if r >= -60 => "우수 (최상의 입력 레이턴시)".to_string(),
         Some(r) if r >= -80 => "보통 (안정적인 무선 연결)".to_string(),
@@ -173,15 +198,27 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     Ok(DeviceInfo {
         firmware_version: firmware_result.as_ref().ok().and_then(Clone::clone),
         rssi: rssi_val,
+        capabilities: capabilities_result.as_ref().ok().cloned(),
         firmware_error: firmware_result.err().map(|error| error.to_string()),
         rssi_error: rssi_result.err().map(|error| error.to_string()),
+        capabilities_error: capabilities_result.err().map(|error| error.to_string()),
         usb_vendor_name: format!("{manufacturer} ({product_name})"),
         usb_speed_class,
         rssi_strength_label,
         battery_level,
         is_charging,
+        dongle_connected: true,
         controller_connected,
+        battery_report_available,
+        rssi_report_available,
+        config_readable,
     })
+}
+
+pub fn read_capabilities(device_id: &str) -> Result<FirmwareCapabilities, BridgeError> {
+    let settings = settings();
+    let device = open_device(device_id)?;
+    read_capabilities_from_device(&device, settings.reports.capabilities)
 }
 
 pub fn apply_config(device_id: &str, config: BridgeConfig) -> Result<(), BridgeError> {
@@ -373,20 +410,20 @@ fn decode_config(bytes: &[u8], settings: &AppSettings) -> Result<BridgeConfig, B
         haptics_buffer_length: bytes[13],
         controller_mode: bytes[14],
         stick_calibration_enabled: bytes.get(15).copied().unwrap_or(0) != 0,
-        left_stick_center_x: read_i16_scaled(bytes, 16, 10000.0).unwrap_or(0.0),
-        left_stick_center_y: read_i16_scaled(bytes, 18, 10000.0).unwrap_or(0.0),
-        left_stick_deadzone: bytes.get(20).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
-        right_stick_center_x: read_i16_scaled(bytes, 21, 10000.0).unwrap_or(0.0),
-        right_stick_center_y: read_i16_scaled(bytes, 23, 10000.0).unwrap_or(0.0),
-        right_stick_deadzone: bytes.get(25).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
-        left_stick_min_x: -1.0,
-        left_stick_max_x: 1.0,
-        left_stick_min_y: -1.0,
-        left_stick_max_y: 1.0,
-        right_stick_min_x: -1.0,
-        right_stick_max_x: 1.0,
-        right_stick_min_y: -1.0,
-        right_stick_max_y: 1.0,
+        left_stick_center_x: read_i8_scaled(bytes, 16, 127.0).unwrap_or(0.0),
+        left_stick_center_y: read_i8_scaled(bytes, 17, 127.0).unwrap_or(0.0),
+        left_stick_deadzone: bytes.get(18).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
+        right_stick_center_x: read_i8_scaled(bytes, 19, 127.0).unwrap_or(0.0),
+        right_stick_center_y: read_i8_scaled(bytes, 20, 127.0).unwrap_or(0.0),
+        right_stick_deadzone: bytes.get(21).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
+        left_stick_min_x: read_i8_scaled(bytes, 22, 127.0).unwrap_or(-1.0),
+        left_stick_max_x: read_i8_scaled(bytes, 23, 127.0).unwrap_or(1.0),
+        left_stick_min_y: read_i8_scaled(bytes, 24, 127.0).unwrap_or(-1.0),
+        left_stick_max_y: read_i8_scaled(bytes, 25, 127.0).unwrap_or(1.0),
+        right_stick_min_x: read_i8_scaled(bytes, 26, 127.0).unwrap_or(-1.0),
+        right_stick_max_x: read_i8_scaled(bytes, 27, 127.0).unwrap_or(1.0),
+        right_stick_min_y: read_i8_scaled(bytes, 28, 127.0).unwrap_or(-1.0),
+        right_stick_max_y: read_i8_scaled(bytes, 29, 127.0).unwrap_or(1.0),
     };
 
     validate_config(&config, settings)?;
@@ -407,14 +444,25 @@ fn encode_config(config: &BridgeConfig) -> Vec<u8> {
     out[13] = config.haptics_buffer_length;
     out[14] = config.controller_mode;
 
-    if out.len() >= 26 {
+    if out.len() >= 22 {
         out[15] = u8::from(config.stick_calibration_enabled);
-        write_i16_scaled(&mut out, 16, config.left_stick_center_x, 10000.0);
-        write_i16_scaled(&mut out, 18, config.left_stick_center_y, 10000.0);
-        out[20] = (config.left_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
-        write_i16_scaled(&mut out, 21, config.right_stick_center_x, 10000.0);
-        write_i16_scaled(&mut out, 23, config.right_stick_center_y, 10000.0);
-        out[25] = (config.right_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
+        write_i8_scaled(&mut out, 16, config.left_stick_center_x, 127.0);
+        write_i8_scaled(&mut out, 17, config.left_stick_center_y, 127.0);
+        out[18] = (config.left_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
+        write_i8_scaled(&mut out, 19, config.right_stick_center_x, 127.0);
+        write_i8_scaled(&mut out, 20, config.right_stick_center_y, 127.0);
+        out[21] = (config.right_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
+    }
+
+    if out.len() >= 30 {
+        write_i8_scaled(&mut out, 22, config.left_stick_min_x, 127.0);
+        write_i8_scaled(&mut out, 23, config.left_stick_max_x, 127.0);
+        write_i8_scaled(&mut out, 24, config.left_stick_min_y, 127.0);
+        write_i8_scaled(&mut out, 25, config.left_stick_max_y, 127.0);
+        write_i8_scaled(&mut out, 26, config.right_stick_min_x, 127.0);
+        write_i8_scaled(&mut out, 27, config.right_stick_max_x, 127.0);
+        write_i8_scaled(&mut out, 28, config.right_stick_min_y, 127.0);
+        write_i8_scaled(&mut out, 29, config.right_stick_max_y, 127.0);
     }
 
     out
@@ -517,17 +565,47 @@ fn read_battery(device: &HidDevice, report_id: u8) -> (Option<u8>, Option<bool>)
     (None, None)
 }
 
-fn read_i16_scaled(bytes: &[u8], offset: usize, scale: f32) -> Option<f32> {
-    let slice = bytes.get(offset..offset + 2)?;
-    Some(i16::from_le_bytes(slice.try_into().ok()?) as f32 / scale)
+fn read_capabilities_from_device(
+    device: &HidDevice,
+    report_id: u8,
+) -> Result<FirmwareCapabilities, BridgeError> {
+    let mut buffer = [0_u8; 64];
+    buffer[0] = report_id;
+    let len = device.get_feature_report(&mut buffer)?;
+    let payload = &buffer[1..len];
+
+    if payload.len() < 12 || &payload[0..4] != b"D5CP" {
+        return Err(BridgeError::InvalidConfig(
+            "펌웨어 기능 리포트 형식이 올바르지 않습니다.".into(),
+        ));
+    }
+
+    let feature_flags = u32::from_le_bytes(payload[8..12].try_into().unwrap());
+    Ok(FirmwareCapabilities {
+        protocol_version: payload[4],
+        config_version: payload[5],
+        config_body_length: payload[6],
+        feature_flags,
+        supports_battery: feature_flags & (1 << 0) != 0,
+        supports_rssi: feature_flags & (1 << 1) != 0,
+        supports_vibration_test: feature_flags & (1 << 2) != 0,
+        supports_adaptive_trigger: feature_flags & (1 << 3) != 0,
+        supports_bootloader_command: feature_flags & (1 << 4) != 0,
+        supports_stick_calibration: feature_flags & (1 << 5) != 0,
+        supports_directional_stick_calibration: feature_flags & (1 << 6) != 0,
+    })
 }
 
-fn write_i16_scaled(out: &mut [u8], offset: usize, value: f32, scale: f32) {
-    if let Some(slice) = out.get_mut(offset..offset + 2) {
+fn read_i8_scaled(bytes: &[u8], offset: usize, scale: f32) -> Option<f32> {
+    bytes.get(offset).map(|value| (*value as i8) as f32 / scale)
+}
+
+fn write_i8_scaled(out: &mut [u8], offset: usize, value: f32, scale: f32) {
+    if let Some(slot) = out.get_mut(offset) {
         let scaled = (value.clamp(-1.0, 1.0) * scale)
             .round()
-            .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
-        slice.copy_from_slice(&scaled.to_le_bytes());
+            .clamp(i8::MIN as f32, i8::MAX as f32) as i8;
+        *slot = scaled as u8;
     }
 }
 

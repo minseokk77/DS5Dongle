@@ -41,14 +41,34 @@ export interface BridgeConfig {
 export interface DeviceInfo {
   firmware_version?: string | null;
   rssi?: number | null;
+  capabilities?: FirmwareCapabilities | null;
   firmware_error?: string | null;
   rssi_error?: string | null;
+  capabilities_error?: string | null;
   usb_vendor_name: string;
   usb_speed_class: string;
   rssi_strength_label: string;
   battery_level?: number | null;
   is_charging?: boolean | null;
+  dongle_connected?: boolean;
   controller_connected?: boolean;
+  battery_report_available?: boolean;
+  rssi_report_available?: boolean;
+  config_readable?: boolean;
+}
+
+export interface FirmwareCapabilities {
+  protocol_version: number;
+  config_version: number;
+  config_body_length: number;
+  feature_flags: number;
+  supports_battery: boolean;
+  supports_rssi: boolean;
+  supports_vibration_test: boolean;
+  supports_adaptive_trigger: boolean;
+  supports_bootloader_command: boolean;
+  supports_stick_calibration: boolean;
+  supports_directional_stick_calibration: boolean;
 }
 
 export interface FirmwareUpdateInfo {
@@ -61,6 +81,11 @@ export interface FirmwareFlashResult {
   version: string;
   asset_name: string;
   drive: string;
+  copied_bytes: number;
+  expected_bytes: number;
+  drive_disappeared: boolean;
+  reconnected: boolean;
+  restored_settings: boolean;
 }
 
 export async function listDevices(): Promise<BridgeDevice[]> {
@@ -84,6 +109,14 @@ export async function readDeviceInfo(deviceId: string): Promise<DeviceInfo> {
     return await invoke<DeviceInfo>('read_device_info', { deviceId });
   } catch (error) {
     throw friendlyError(error, '장치 정보를 읽지 못했습니다.');
+  }
+}
+
+export async function readCapabilities(deviceId: string): Promise<FirmwareCapabilities> {
+  try {
+    return await invoke<FirmwareCapabilities>('read_capabilities', { deviceId });
+  } catch (error) {
+    throw friendlyError(error, '펌웨어 기능 리포트를 읽지 못했습니다.');
   }
 }
 

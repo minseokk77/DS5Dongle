@@ -41,6 +41,7 @@
   export let onAutoFirmwareUpdateChange: (enabled: boolean) => void = () => {};
   export let onResetDefaults: () => void = () => {};
   export let onRecoveryFirmwareUpdate: () => void | Promise<void> = () => {};
+  export let onExportLogs: () => void = () => {};
 
   function handleBackdropClick(event: MouseEvent) {
     if (event.currentTarget === event.target) {
@@ -162,6 +163,9 @@
           <strong>{text.recentLogs}</strong>
           <p>{text.recentLogsDesc}</p>
         </div>
+        <button class="settings-action-btn narrow" type="button" onclick={onExportLogs}>
+          <Icon name="download" size={15} /> {text.exportLogs}
+        </button>
         <div class="log-list">
           {#if logs.length === 0}
             <div class="empty-log">{text.noLogs}</div>

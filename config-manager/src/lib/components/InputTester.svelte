@@ -21,6 +21,10 @@
     centerX: number;
     centerY: number;
     maxRadius: number;
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
     recommended: StickDeadzone;
     message: string;
   }
@@ -31,6 +35,7 @@
     capabilities = [],
     onLog = () => {},
     onCalibrationApply = async () => {},
+    onCalibrationClear = async () => {},
     isOpen = $bindable(false)
   }: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,7 +43,8 @@
     deviceId?: string;
     capabilities?: FirmwareCapability[];
     onLog?: (message: string, kind?: 'info' | 'error') => void;
-    onCalibrationApply?: (side: StickSide, result: { centerX: number; centerY: number; deadzone: number }) => Promise<void> | void;
+    onCalibrationApply?: (side: StickSide, result: { centerX: number; centerY: number; deadzone: number; minX: number; maxX: number; minY: number; maxY: number }) => Promise<void> | void;
+    onCalibrationClear?: (side: StickSide) => Promise<void> | void;
     isOpen: boolean;
   } = $props();
 
@@ -95,8 +101,8 @@
   let rightCalibration = $state<CalibrationResult>(emptyCalibration());
 
   let canUseBridge = $derived(Boolean(deviceId));
-  let canTestVibration = $derived(canUseBridge);
-  let canTestTrigger = $derived(canUseBridge);
+  let canTestVibration = $derived(canUseBridge && capabilities.find((capability) => capability.key === 'vibration')?.supported !== false);
+  let canTestTrigger = $derived(canUseBridge && capabilities.find((capability) => capability.key === 'trigger')?.supported !== false);
   let leftDrift = $derived(getDrift(leftStickX, leftStickY));
   let rightDrift = $derived(getDrift(rightStickX, rightStickY));
 
@@ -107,6 +113,10 @@
       centerX: 0,
       centerY: 0,
       maxRadius: 0,
+      minX: -1,
+      maxX: 1,
+      minY: -1,
+      maxY: 1,
       recommended: { ...defaultDeadzone },
       message: ''
     };
@@ -324,6 +334,10 @@
       centerX: center.x,
       centerY: center.y,
       maxRadius,
+      minX,
+      maxX,
+      minY,
+      maxY,
       recommended,
       message: warning ? text.calibrationWarning : text.calibrationDone
     } satisfies CalibrationResult;
@@ -358,16 +372,24 @@
       if (side === 'left') leftDeadzoneThreshold = result.recommended;
       else rightDeadzoneThreshold = result.recommended;
       onLog(`${side === 'left' ? text.leftStick : text.rightStick}: ${result.message}`);
-      await onCalibrationApply(side, {
-        centerX: result.centerX,
-        centerY: result.centerY,
-        deadzone: Math.max(
-          result.recommended.up,
-          result.recommended.down,
-          result.recommended.left,
-          result.recommended.right
-        )
-      });
+      if (result.phase === 'done') {
+        await onCalibrationApply(side, {
+          centerX: result.centerX,
+          centerY: result.centerY,
+          minX: result.minX,
+          maxX: result.maxX,
+          minY: result.minY,
+          maxY: result.maxY,
+          deadzone: Math.max(
+            result.recommended.up,
+            result.recommended.down,
+            result.recommended.left,
+            result.recommended.right
+          )
+        });
+      } else {
+        onLog(text.calibrationNotSaved, 'error');
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : text.calibrationFailed;
       setResult({ ...emptyCalibration(), phase: 'warning', message });
@@ -385,6 +407,11 @@
       rightDeadzoneThreshold = { ...defaultDeadzone };
       rightCalibration = emptyCalibration();
     }
+  }
+
+  async function clearCalibration(side: StickSide) {
+    resetCalibration(side);
+    await onCalibrationClear(side);
   }
 
   async function triggerVibration(overrideWeak?: number, overrideStrong?: number, overrideDuration?: number) {
@@ -544,11 +571,13 @@
             <div class="result-grid">
               <span>{text.calibrationCenter}</span><b>{leftCalibration.centerX.toFixed(3)}, {leftCalibration.centerY.toFixed(3)}</b>
               <span>{text.calibrationRadius}</span><b>{leftCalibration.maxRadius.toFixed(1)}%</b>
+              <span>{text.calibrationReach}</span><b>X {leftCalibration.minX.toFixed(2)}~{leftCalibration.maxX.toFixed(2)} / Y {leftCalibration.minY.toFixed(2)}~{leftCalibration.maxY.toFixed(2)}</b>
               <span>{text.deadzone}</span><b>{leftDeadzoneThreshold.up.toFixed(1)}%</b>
             </div>
             <div class="button-row">
               <button type="button" disabled={!isConnected || Boolean(calibratingSide)} onclick={() => startCalibration('left')}>{text.startCalibration}</button>
               <button type="button" disabled={Boolean(calibratingSide)} onclick={() => resetCalibration('left')}>{text.remeasure}</button>
+              <button type="button" disabled={Boolean(calibratingSide)} onclick={() => clearCalibration('left')}>{text.clearCalibration}</button>
             </div>
           </section>
           <section class="tester-card">
@@ -558,11 +587,13 @@
             <div class="result-grid">
               <span>{text.calibrationCenter}</span><b>{rightCalibration.centerX.toFixed(3)}, {rightCalibration.centerY.toFixed(3)}</b>
               <span>{text.calibrationRadius}</span><b>{rightCalibration.maxRadius.toFixed(1)}%</b>
+              <span>{text.calibrationReach}</span><b>X {rightCalibration.minX.toFixed(2)}~{rightCalibration.maxX.toFixed(2)} / Y {rightCalibration.minY.toFixed(2)}~{rightCalibration.maxY.toFixed(2)}</b>
               <span>{text.deadzone}</span><b>{rightDeadzoneThreshold.up.toFixed(1)}%</b>
             </div>
             <div class="button-row">
               <button type="button" disabled={!isConnected || Boolean(calibratingSide)} onclick={() => startCalibration('right')}>{text.startCalibration}</button>
               <button type="button" disabled={Boolean(calibratingSide)} onclick={() => resetCalibration('right')}>{text.remeasure}</button>
+              <button type="button" disabled={Boolean(calibratingSide)} onclick={() => clearCalibration('right')}>{text.clearCalibration}</button>
             </div>
           </section>
         </div>

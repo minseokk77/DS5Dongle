@@ -1,4 +1,4 @@
-use crate::bridge::{self, BridgeConfig, BridgeDevice, BridgeError, DeviceInfo};
+use crate::bridge::{self, BridgeConfig, BridgeDevice, BridgeError, DeviceInfo, FirmwareCapabilities};
 use crate::updater::{self, FirmwareFlashResult, FirmwareUpdateInfo, UpdateError};
 
 #[tauri::command]
@@ -14,6 +14,11 @@ pub fn read_config(device_id: String) -> Result<BridgeConfig, BridgeError> {
 #[tauri::command]
 pub fn read_device_info(device_id: String) -> Result<DeviceInfo, BridgeError> {
     bridge::read_device_info(&device_id)
+}
+
+#[tauri::command]
+pub fn read_capabilities(device_id: String) -> Result<FirmwareCapabilities, BridgeError> {
+    bridge::read_capabilities(&device_id)
 }
 
 #[tauri::command]

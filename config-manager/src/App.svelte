@@ -68,9 +68,20 @@
     right_stick_min_y: -1,
     right_stick_max_y: 1
   };
-  const appVersion = '0.0.12';
+  const appVersion = '0.0.14';
   const releaseChannel = 'debug';
   const updateRepository = 'minseokk77/DS5Dongle';
+
+  const emptyDeviceInfo = (): DeviceInfo => ({
+    usb_vendor_name: '',
+    usb_speed_class: '',
+    rssi_strength_label: '',
+    dongle_connected: false,
+    controller_connected: false,
+    battery_report_available: false,
+    rssi_report_available: false,
+    config_readable: false
+  });
 
   let lang: Lang = 'ko';
   let themeMode: ThemeMode = 'system';
@@ -79,11 +90,7 @@
   let selectedDeviceId = '';
   let config: BridgeConfig = { ...defaultConfig };
   let originalConfig: BridgeConfig | null = null;
-  let deviceInfo: DeviceInfo = {
-    usb_vendor_name: '',
-    usb_speed_class: '',
-    rssi_strength_label: ''
-  };
+  let deviceInfo: DeviceInfo = emptyDeviceInfo();
   let statusCode: StatusCode = 'ready';
   let statusOverride = '';
   let toastText = '';
@@ -100,13 +107,14 @@
   let diagnosticLogs: DiagnosticLog[] = [];
   let updateStep: UpdateStepCode = 'idle';
   let showUpdateProgressModal = false;
+  let lastUpdateError = '';
 
   $: text = i18n[lang];
   $: effectiveTheme = themeMode === 'system' ? systemTheme : themeMode;
   $: selectedDevice = devices.find((device) => device.id === selectedDeviceId) ?? null;
-  $: isBridgeConnected = Boolean(selectedDeviceId && selectedDevice && statusCode !== 'noDevice');
+  $: isBridgeConnected = Boolean(selectedDeviceId && selectedDevice && deviceInfo.dongle_connected !== false && statusCode !== 'noDevice');
   $: isControllerConnected = Boolean(isBridgeConnected && deviceInfo.controller_connected);
-  $: showControllerUi = Boolean(isControllerConnected && deviceInfo.battery_level !== undefined && deviceInfo.battery_level !== null);
+  $: showControllerUi = isControllerConnected;
   $: isDirty = originalConfig ? JSON.stringify(originalConfig) !== JSON.stringify(config) : false;
   $: statusText = statusOverride || text.status[statusCode];
   $: bridgeStatusText = isBridgeConnected ? text.picoConnected : text.picoDisconnected;
@@ -279,31 +287,29 @@
 
   function buildFirmwareCapabilities(): FirmwareCapability[] {
     const hasBridge = Boolean(selectedDeviceId) || devices.length > 0 || statusCode !== 'noDevice';
+    const caps = deviceInfo.capabilities;
+    const legacyReason = hasBridge ? text.legacyFirmwareCapabilityUnknown : text.capRequiresBridge;
+    const capability = (key: string, label: string, supported?: boolean): FirmwareCapability => ({
+      key,
+      label,
+      supported: hasBridge && (caps ? Boolean(supported) : key === 'vibration' || key === 'trigger' || key === 'bootloader'),
+      reason: caps ? text.capUnsupportedByFirmware : legacyReason
+    });
+
     return [
-      {
-        key: 'vibration',
-        label: text.capVibration,
-        supported: hasBridge,
-        reason: text.capRequiresBridge
-      },
-      {
-        key: 'trigger',
-        label: text.capAdaptiveTrigger,
-        supported: hasBridge,
-        reason: text.capRequiresBridge
-      },
-      {
-        key: 'bootloader',
-        label: text.capBootloader,
-        supported: hasBridge,
-        reason: text.capRequiresBridge
-      },
-      {
-        key: 'calibration',
-        label: text.stickCalibration,
-        supported: hasBridge && config.config_version >= 3,
-        reason: hasBridge ? text.calibrationNoInfo : text.capRequiresBridge
-      }
+      ...(caps?.supports_battery || deviceInfo.battery_report_available
+        ? [capability('battery', text.capBattery, caps?.supports_battery ?? true)]
+        : []),
+      ...(caps?.supports_rssi || deviceInfo.rssi_report_available
+        ? [capability('rssi', text.capRssi, caps?.supports_rssi ?? true)]
+        : []),
+      capability('vibration', text.capVibration, caps?.supports_vibration_test),
+      capability('trigger', text.capAdaptiveTrigger, caps?.supports_adaptive_trigger),
+      capability('bootloader', text.capBootloader, caps?.supports_bootloader_command),
+      capability('calibration', text.stickCalibration, caps?.supports_stick_calibration ?? config.config_version >= 3),
+      ...(caps?.supports_directional_stick_calibration
+        ? [capability('directionalCalibration', text.capDirectionalCalibration, true)]
+        : [])
     ];
   }
 
@@ -349,6 +355,52 @@
     return `X ${centerX.toFixed(3)} / Y ${centerY.toFixed(3)} · ${deadzone.toFixed(1)}%`;
   }
 
+  function comparableConfig(value: BridgeConfig) {
+    return JSON.stringify(value);
+  }
+
+  async function saveAndVerify(deviceId: string, nextConfig: BridgeConfig) {
+    await applyConfig(deviceId, nextConfig);
+    await saveConfig(deviceId);
+    const verified = await readConfig(deviceId);
+    if (comparableConfig(verified) !== comparableConfig(nextConfig)) {
+      addLog(text.settingsVerifyMismatch, 'error');
+      showToast(text.settingsVerifyMismatch, 'error');
+    }
+    config = verified;
+    originalConfig = structuredClone(verified);
+  }
+
+  function exportDiagnosticLogs() {
+    const payload = {
+      exported_at: new Date().toISOString(),
+      app_version: appVersion,
+      firmware_version: settingsFirmwareVersion,
+      device_state: {
+        dongle_connected: isBridgeConnected,
+        controller_connected: isControllerConnected,
+        gamepad_modal_open: showInputTesterModal,
+        battery_report_available: Boolean(deviceInfo.battery_report_available),
+        rssi_report_available: Boolean(deviceInfo.rssi_report_available),
+        config_readable: Boolean(deviceInfo.config_readable)
+      },
+      last_update_step: updateStep,
+      last_update_error: lastUpdateError,
+      hid_errors: {
+        firmware_error: deviceInfo.firmware_error ?? null,
+        rssi_error: deviceInfo.rssi_error ?? null,
+        capabilities_error: deviceInfo.capabilities_error ?? null
+      },
+      logs: diagnosticLogs
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `ds5-dongle-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
   function localizeUsbSpeed(raw: string) {
     if (!raw) return '';
     if (raw.includes('Full-Speed')) return text.usbFullSpeedStable;
@@ -374,6 +426,7 @@
       await task();
     } catch (error) {
       errorText = error instanceof Error ? error.message : text.errorUnknown;
+      lastUpdateError = errorText;
       showError(errorText);
     } finally {
       isBusy = false;
@@ -386,7 +439,7 @@
       if (!devices.length) {
         selectedDeviceId = '';
         originalConfig = null;
-        deviceInfo = {};
+        deviceInfo = emptyDeviceInfo();
         setStatus('noDevice');
         return;
       }
@@ -436,11 +489,7 @@
       if (!latestDevices.length || !latestDevices.some((device) => device.id === selectedDeviceId)) {
         selectedDeviceId = '';
         originalConfig = null;
-        deviceInfo = {
-          usb_vendor_name: '',
-          usb_speed_class: '',
-          rssi_strength_label: ''
-        };
+        deviceInfo = emptyDeviceInfo();
         setStatus('noDevice');
       }
     } catch {
@@ -448,11 +497,7 @@
       selectedDeviceId = '';
       devices = [];
       originalConfig = null;
-      deviceInfo = {
-        usb_vendor_name: '',
-        usb_speed_class: '',
-        rssi_strength_label: ''
-      };
+      deviceInfo = emptyDeviceInfo();
       setStatus('noDevice');
     }
   }
@@ -498,9 +543,7 @@
   async function onSave() {
     if (!selectedDeviceId) return;
     await runTask(async () => {
-      await applyConfig(selectedDeviceId, config);
-      await saveConfig(selectedDeviceId);
-      originalConfig = structuredClone(config);
+      await saveAndVerify(selectedDeviceId, config);
       setStatus('saved');
     });
   }
@@ -550,9 +593,9 @@
 
   async function onCalibrationApply(
     side: 'left' | 'right',
-    result: { centerX: number; centerY: number; deadzone: number }
+    result: { centerX: number; centerY: number; deadzone: number; minX: number; maxX: number; minY: number; maxY: number }
   ) {
-    config = {
+    const nextConfig = {
       ...config,
       config_version: 3,
       stick_calibration_enabled: true,
@@ -560,20 +603,60 @@
         ? {
             left_stick_center_x: result.centerX,
             left_stick_center_y: result.centerY,
-            left_stick_deadzone: result.deadzone
+            left_stick_deadzone: result.deadzone,
+            left_stick_min_x: result.minX,
+            left_stick_max_x: result.maxX,
+            left_stick_min_y: result.minY,
+            left_stick_max_y: result.maxY
           }
         : {
             right_stick_center_x: result.centerX,
             right_stick_center_y: result.centerY,
-            right_stick_deadzone: result.deadzone
+            right_stick_deadzone: result.deadzone,
+            right_stick_min_x: result.minX,
+            right_stick_max_x: result.maxX,
+            right_stick_min_y: result.minY,
+            right_stick_max_y: result.maxY
           })
     };
+    config = nextConfig;
 
     if (selectedDeviceId) {
-      await applyConfig(selectedDeviceId, config);
-      await saveConfig(selectedDeviceId);
-      originalConfig = structuredClone(config);
+      await saveAndVerify(selectedDeviceId, nextConfig);
       addLog(text.calibrationDone);
+    }
+  }
+
+  async function onCalibrationClear(side: 'left' | 'right') {
+    const nextConfig = {
+      ...config,
+      stick_calibration_enabled: side === 'left'
+        ? Boolean(config.right_stick_center_x || config.right_stick_center_y || (config.right_stick_deadzone ?? 1) > 1)
+        : Boolean(config.left_stick_center_x || config.left_stick_center_y || (config.left_stick_deadzone ?? 1) > 1),
+      ...(side === 'left'
+        ? {
+            left_stick_center_x: 0,
+            left_stick_center_y: 0,
+            left_stick_deadzone: 1,
+            left_stick_min_x: -1,
+            left_stick_max_x: 1,
+            left_stick_min_y: -1,
+            left_stick_max_y: 1
+          }
+        : {
+            right_stick_center_x: 0,
+            right_stick_center_y: 0,
+            right_stick_deadzone: 1,
+            right_stick_min_x: -1,
+            right_stick_max_x: 1,
+            right_stick_min_y: -1,
+            right_stick_max_y: 1
+          })
+    };
+    config = nextConfig;
+    if (selectedDeviceId) {
+      await saveAndVerify(selectedDeviceId, nextConfig);
+      addLog(text.calibrationCleared);
     }
   }
 
@@ -621,10 +704,7 @@
     const deadline = Date.now() + 12000;
     while (Date.now() < deadline) {
       try {
-        await applyConfig(restoredDeviceId, preservedConfig);
-        await saveConfig(restoredDeviceId);
-        config = structuredClone(preservedConfig);
-        originalConfig = structuredClone(preservedConfig);
+        await saveAndVerify(restoredDeviceId, preservedConfig);
         await readAll();
         statusOverride = '';
         addLog(text.settingsRestored);
@@ -679,8 +759,14 @@
 
     updateStep = selectedDeviceId ? 'bootloader' : 'copying';
     statusOverride = text.updateSteps[updateStep];
-    const result = await flashLatestDebugFirmware(selectedDeviceId || undefined);
     updateStep = 'copying';
+    const result = await flashLatestDebugFirmware(selectedDeviceId || undefined);
+    if (result.expected_bytes !== result.copied_bytes || !result.drive_disappeared) {
+      addLog(
+        `${text.updateCopyVerifyWarning}: ${result.copied_bytes}/${result.expected_bytes}, driveGone=${result.drive_disappeared}`,
+        'error'
+      );
+    }
     addLog(`${text.status.updated}: ${result.version} / ${result.asset_name}`);
     const shouldRestoreSettings = Boolean(preservedConfig && previousDeviceId);
     const settingsRestored = await restoreConfigAfterFirmwareUpdate(preservedConfig, previousDeviceId);
@@ -801,6 +887,7 @@
     capabilities={firmwareCapabilities}
     onLog={addLog}
     onCalibrationApply={onCalibrationApply}
+    onCalibrationClear={onCalibrationClear}
     bind:isOpen={showInputTesterModal}
   />
   <SettingsModal
@@ -826,6 +913,7 @@
     onAutoFirmwareUpdateChange={setAutoFirmwareUpdate}
     onResetDefaults={resetToDefaults}
     onRecoveryFirmwareUpdate={onRecoveryFirmwareUpdate}
+    onExportLogs={exportDiagnosticLogs}
   />
 
   {#if showUpdateProgressModal}
@@ -851,6 +939,13 @@
             </div>
           {/each}
         </div>
+        {#if updateStep === 'failed'}
+          <div class="update-progress-actions">
+            <button type="button" onclick={onFirmwareUpdate}>{text.retryUpdate}</button>
+            <button type="button" onclick={onRecoveryFirmwareUpdate}>{text.recoveryFirmwareUpdate}</button>
+            <button type="button" onclick={() => (showSettingsModal = true)}>{text.viewLogs}</button>
+          </div>
+        {/if}
         <p class="update-progress-footnote">{text.firmwareUpdateProgressFootnote}</p>
       </div>
     </div>

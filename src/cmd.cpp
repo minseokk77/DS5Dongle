@@ -20,7 +20,8 @@ bool is_pico_cmd(uint8_t report_id) {
         report_id == 0xf7 ||
         report_id == 0xf5 ||
         report_id == 0xf8 ||
-        report_id == 0xf9
+        report_id == 0xf9 ||
+        report_id == 0xfa
     ) {
         return true;
     }
@@ -39,6 +40,12 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
     }
     if (report_id == 0xf8) {
         printf("[HID] Receive 0xf8 getting firmware version\n");
+        const auto len = std::min(strlen(PICO_PROGRAM_VERSION_STRING), static_cast<size_t>(reqlen));
+        memcpy(buffer, PICO_PROGRAM_VERSION_STRING, len);
+        return len;
+    }
+    if (report_id == 0xfa) {
+        printf("[HID] Receive 0xfa getting capabilities\n");
         constexpr uint32_t FEATURE_BATTERY = 1u << 0;
         constexpr uint32_t FEATURE_RSSI = 1u << 1;
         constexpr uint32_t FEATURE_VIBRATION_TEST = 1u << 2;
@@ -54,18 +61,19 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
             FEATURE_BOOTLOADER_COMMAND |
             FEATURE_STICK_CALIBRATION |
             FEATURE_DIRECTIONAL_STICK_CALIBRATION;
-        char version_with_meta[64];
-        const int written = snprintf(
-            version_with_meta,
-            sizeof(version_with_meta),
-            "%s;cfg=%u;cap=%lx",
-            PICO_PROGRAM_VERSION_STRING,
+        uint8_t capabilities[12] = {
+            'D', '5', 'C', 'P',
+            1,
             get_config().config_version,
-            static_cast<unsigned long>(features)
-        );
-        const auto safe_len = written > 0 ? static_cast<size_t>(written) : strlen(PICO_PROGRAM_VERSION_STRING);
-        const auto len = std::min(safe_len, static_cast<size_t>(reqlen));
-        memcpy(buffer, version_with_meta, len);
+            static_cast<uint8_t>(sizeof(Config_body)),
+            0,
+            static_cast<uint8_t>((features >> 0) & 0xff),
+            static_cast<uint8_t>((features >> 8) & 0xff),
+            static_cast<uint8_t>((features >> 16) & 0xff),
+            static_cast<uint8_t>((features >> 24) & 0xff),
+        };
+        const auto len = std::min(sizeof(capabilities), static_cast<size_t>(reqlen));
+        memcpy(buffer, capabilities, len);
         return len;
     }
     if (report_id == 0xf9) {

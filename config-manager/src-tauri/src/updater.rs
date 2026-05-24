@@ -45,12 +45,11 @@ pub struct FirmwareFlashResult {
     pub version: String,
     pub asset_name: String,
     pub drive: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct BootloaderStatus {
-    pub available: bool,
-    pub drive: Option<String>,
+    pub copied_bytes: u64,
+    pub expected_bytes: u64,
+    pub drive_disappeared: bool,
+    pub reconnected: bool,
+    pub restored_settings: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,14 +125,22 @@ pub async fn flash_latest_debug_firmware(
         .error_for_status()?;
         
     let bytes = response.bytes().await?;
+    let expected_bytes = bytes.len() as u64;
 
     let target = Path::new(&drive).join(&update.asset_name);
     fs::write(&target, bytes)?;
+    let copied_bytes = fs::metadata(&target)?.len();
+    let drive_disappeared = wait_for_bootloader_drive_gone(&drive, Duration::from_secs(18));
 
     Ok(FirmwareFlashResult {
         version: update.version,
         asset_name: update.asset_name,
         drive,
+        copied_bytes,
+        expected_bytes,
+        drive_disappeared,
+        reconnected: false,
+        restored_settings: false,
     })
 }
 
@@ -274,14 +281,6 @@ fn wide_null(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain([0]).collect()
 }
 
-pub fn bootloader_status() -> Result<BootloaderStatus, UpdateError> {
-    let drive = find_bootloader_drive_optional()?;
-    Ok(BootloaderStatus {
-        available: drive.is_some(),
-        drive,
-    })
-}
-
 pub async fn recovery_flash_latest_debug_firmware() -> Result<FirmwareFlashResult, UpdateError> {
     flash_latest_debug_firmware(None).await
 }
@@ -315,6 +314,17 @@ fn wait_for_bootloader_drive(timeout: Duration) -> Result<String, UpdateError> {
         }
         thread::sleep(Duration::from_millis(350));
     }
+}
+
+fn wait_for_bootloader_drive_gone(drive: &str, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !Path::new(drive).exists() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(350));
+    }
+    false
 }
 
 /// Windows API를 사용하여 주어진 Volume Label에 해당하는 드라이브 경로를 찾습니다.
