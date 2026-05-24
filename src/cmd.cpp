@@ -15,6 +15,23 @@
 #include "pico/bootrom.h"
 #include "pico/time.h"
 
+constexpr uint8_t CAPABILITY_PROTOCOL_VERSION = 1;
+constexpr uint32_t FEATURE_BATTERY = 1u << 0;
+constexpr uint32_t FEATURE_RSSI = 1u << 1;
+constexpr uint32_t FEATURE_VIBRATION_TEST = 1u << 2;
+constexpr uint32_t FEATURE_ADAPTIVE_TRIGGER = 1u << 3;
+constexpr uint32_t FEATURE_BOOTLOADER_COMMAND = 1u << 4;
+constexpr uint32_t FEATURE_STICK_CALIBRATION = 1u << 5;
+constexpr uint32_t FEATURE_DIRECTIONAL_STICK_CALIBRATION = 1u << 6;
+constexpr uint32_t FEATURE_FLAGS =
+    FEATURE_BATTERY |
+    FEATURE_RSSI |
+    FEATURE_VIBRATION_TEST |
+    FEATURE_ADAPTIVE_TRIGGER |
+    FEATURE_BOOTLOADER_COMMAND |
+    FEATURE_STICK_CALIBRATION |
+    FEATURE_DIRECTIONAL_STICK_CALIBRATION;
+
 bool is_pico_cmd(uint8_t report_id) {
     if (report_id == 0xf6 ||
         report_id == 0xf7 ||
@@ -46,31 +63,17 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
     }
     if (report_id == 0xfa) {
         printf("[HID] Receive 0xfa getting capabilities\n");
-        constexpr uint32_t FEATURE_BATTERY = 1u << 0;
-        constexpr uint32_t FEATURE_RSSI = 1u << 1;
-        constexpr uint32_t FEATURE_VIBRATION_TEST = 1u << 2;
-        constexpr uint32_t FEATURE_ADAPTIVE_TRIGGER = 1u << 3;
-        constexpr uint32_t FEATURE_BOOTLOADER_COMMAND = 1u << 4;
-        constexpr uint32_t FEATURE_STICK_CALIBRATION = 1u << 5;
-        constexpr uint32_t FEATURE_DIRECTIONAL_STICK_CALIBRATION = 1u << 6;
-        constexpr uint32_t features =
-            FEATURE_BATTERY |
-            FEATURE_RSSI |
-            FEATURE_VIBRATION_TEST |
-            FEATURE_ADAPTIVE_TRIGGER |
-            FEATURE_BOOTLOADER_COMMAND |
-            FEATURE_STICK_CALIBRATION |
-            FEATURE_DIRECTIONAL_STICK_CALIBRATION;
+        static_assert(sizeof(Config_body) <= 255);
         uint8_t capabilities[12] = {
             'D', '5', 'C', 'P',
-            1,
+            CAPABILITY_PROTOCOL_VERSION,
             get_config().config_version,
             static_cast<uint8_t>(sizeof(Config_body)),
             0,
-            static_cast<uint8_t>((features >> 0) & 0xff),
-            static_cast<uint8_t>((features >> 8) & 0xff),
-            static_cast<uint8_t>((features >> 16) & 0xff),
-            static_cast<uint8_t>((features >> 24) & 0xff),
+            static_cast<uint8_t>((FEATURE_FLAGS >> 0) & 0xff),
+            static_cast<uint8_t>((FEATURE_FLAGS >> 8) & 0xff),
+            static_cast<uint8_t>((FEATURE_FLAGS >> 16) & 0xff),
+            static_cast<uint8_t>((FEATURE_FLAGS >> 24) & 0xff),
         };
         const auto len = std::min(sizeof(capabilities), static_cast<size_t>(reqlen));
         memcpy(buffer, capabilities, len);

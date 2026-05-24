@@ -289,10 +289,11 @@
     const hasBridge = Boolean(selectedDeviceId) || devices.length > 0 || statusCode !== 'noDevice';
     const caps = deviceInfo.capabilities;
     const legacyReason = hasBridge ? text.legacyFirmwareCapabilityUnknown : text.capRequiresBridge;
+    const legacySupported = new Set(['vibration', 'trigger', 'bootloader']);
     const capability = (key: string, label: string, supported?: boolean): FirmwareCapability => ({
       key,
       label,
-      supported: hasBridge && (caps ? Boolean(supported) : key === 'vibration' || key === 'trigger' || key === 'bootloader'),
+      supported: hasBridge && (caps ? Boolean(supported) : Boolean(supported) || legacySupported.has(key)),
       reason: caps ? text.capUnsupportedByFirmware : legacyReason
     });
 
@@ -355,16 +356,68 @@
     return `X ${centerX.toFixed(3)} / Y ${centerY.toFixed(3)} · ${deadzone.toFixed(1)}%`;
   }
 
-  function comparableConfig(value: BridgeConfig) {
-    return JSON.stringify(value);
+  function configMismatchDetails(verified: BridgeConfig, expected: BridgeConfig) {
+    const details: string[] = [];
+    const stickTolerance = 1 / 127 + 0.001;
+    const percentTolerance = 0.051;
+    const floatTolerance = 0.001;
+
+    const checkExact = (field: keyof BridgeConfig) => {
+      if (verified[field] !== expected[field]) {
+        details.push(`${String(field)}: expected=${String(expected[field])}, actual=${String(verified[field])}`);
+      }
+    };
+
+    const checkBool = (field: keyof BridgeConfig) => {
+      if (Boolean(verified[field]) !== Boolean(expected[field])) {
+        details.push(`${String(field)}: expected=${Boolean(expected[field])}, actual=${Boolean(verified[field])}`);
+      }
+    };
+
+    const checkNumber = (field: keyof BridgeConfig, tolerance: number) => {
+      const actual = Number(verified[field] ?? 0);
+      const expectedValue = Number(expected[field] ?? 0);
+      if (Math.abs(actual - expectedValue) > tolerance) {
+        details.push(`${String(field)}: expected=${expectedValue}, actual=${actual}, tolerance=${tolerance}`);
+      }
+    };
+
+    checkExact('config_version');
+    checkNumber('haptics_gain', floatTolerance);
+    checkNumber('speaker_volume_percent', floatTolerance);
+    checkExact('inactive_time');
+    checkExact('disable_inactive_disconnect');
+    checkExact('disable_pico_led');
+    checkExact('polling_rate_mode');
+    checkExact('haptics_buffer_length');
+    checkExact('controller_mode');
+    checkBool('stick_calibration_enabled');
+    checkNumber('left_stick_center_x', stickTolerance);
+    checkNumber('left_stick_center_y', stickTolerance);
+    checkNumber('left_stick_deadzone', percentTolerance);
+    checkNumber('right_stick_center_x', stickTolerance);
+    checkNumber('right_stick_center_y', stickTolerance);
+    checkNumber('right_stick_deadzone', percentTolerance);
+    checkNumber('left_stick_min_x', stickTolerance);
+    checkNumber('left_stick_max_x', stickTolerance);
+    checkNumber('left_stick_min_y', stickTolerance);
+    checkNumber('left_stick_max_y', stickTolerance);
+    checkNumber('right_stick_min_x', stickTolerance);
+    checkNumber('right_stick_max_x', stickTolerance);
+    checkNumber('right_stick_min_y', stickTolerance);
+    checkNumber('right_stick_max_y', stickTolerance);
+
+    return details;
   }
 
   async function saveAndVerify(deviceId: string, nextConfig: BridgeConfig) {
     await applyConfig(deviceId, nextConfig);
     await saveConfig(deviceId);
     const verified = await readConfig(deviceId);
-    if (comparableConfig(verified) !== comparableConfig(nextConfig)) {
+    const mismatchDetails = configMismatchDetails(verified, nextConfig);
+    if (mismatchDetails.length > 0) {
       addLog(text.settingsVerifyMismatch, 'error');
+      mismatchDetails.forEach((detail) => addLog(`${text.settingsVerifyMismatch}: ${detail}`, 'error'));
       showToast(text.settingsVerifyMismatch, 'error');
     }
     config = verified;

@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)]
   [string]$Tag,
 
@@ -46,10 +46,18 @@ function New-ReleaseNotesFile {
   param(
     [string]$Tag,
     [string]$Repository,
-    [string]$AssetStage
+    [string]$AssetStage,
+    [string[]]$Assets
   )
 
   $notesPath = Join-Path $AssetStage "release-notes-$($Tag.TrimStart('v')).md"
+  $previousTag = @(git tag --list "v0.0.*.*" --sort=-v:refname | Where-Object { $_ -ne $Tag } | Select-Object -First 1)
+  $range = if ($previousTag) { "$previousTag..HEAD" } else { "HEAD" }
+  $changes = @(git log $range --pretty=format:"- %s")
+  if ($changes.Count -eq 0) {
+    $changes = @("- 소스와 빌드 에셋을 현재 태그 기준으로 정리했습니다.")
+  }
+  $assetLines = @($Assets | ForEach-Object { "- $(Split-Path -Leaf $_)" })
   $notes = @"
 로컬 빌드 릴리즈입니다.
 
@@ -57,6 +65,12 @@ function New-ReleaseNotesFile {
 - 앱 설치 파일과 debug UF2를 로컬에서 빌드해 업로드했습니다.
 - 앱과 펌웨어 업데이트 경로는 $Repository 릴리즈를 기준으로 동작합니다.
 - 공식 DS5Dongle 기반: v0.6.0-hotfix
+
+## 변경 사항
+$($changes -join "`n")
+
+## 에셋
+$($assetLines -join "`n")
 
 업데이트 전 USB를 분리하지 말고, 앱의 펌웨어 업데이트 진행 창이 완료될 때까지 기다려 주세요.
 "@
@@ -81,8 +95,15 @@ try {
   Push-Location $configManager
   try {
     pnpm.cmd install --frozen-lockfile
-    pnpm.cmd build
-    cargo check --manifest-path ".\src-tauri\Cargo.toml"
+  }
+  finally {
+    Pop-Location
+  }
+
+  & (Join-Path $repoRoot "scripts\pre-release-check.ps1") -Repository $Repository
+
+  Push-Location $configManager
+  try {
     pnpm.cmd tauri build
   }
   finally {
@@ -119,7 +140,7 @@ try {
     throw "업로드할 릴리즈 에셋을 찾지 못했습니다."
   }
 
-  $releaseNotesPath = New-ReleaseNotesFile -Tag $Tag -Repository $Repository -AssetStage $assetStage
+  $releaseNotesPath = New-ReleaseNotesFile -Tag $Tag -Repository $Repository -AssetStage $assetStage -Assets $assets
 
   $releaseTags = @(gh release list --repo $Repository --limit 100 --json tagName --jq '.[].tagName')
   $releaseExists = $releaseTags -contains $Tag

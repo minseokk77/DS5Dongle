@@ -574,6 +574,11 @@ fn read_capabilities_from_device(
     let mut buffer = [0_u8; 64];
     buffer[0] = report_id;
     let len = device.get_feature_report(&mut buffer)?;
+    if len <= 1 {
+        return Err(BridgeError::InvalidConfig(
+            "펌웨어 기능 리포트가 비어 있습니다.".into(),
+        ));
+    }
     let payload = &buffer[1..len];
 
     if payload.len() < 12 || &payload[0..4] != b"D5CP" {
@@ -583,10 +588,25 @@ fn read_capabilities_from_device(
     }
 
     let feature_flags = u32::from_le_bytes(payload[8..12].try_into().unwrap());
+    let protocol_version = payload[4];
+    let config_version = payload[5];
+    let config_body_length = payload[6];
+    if protocol_version == 0 {
+        return Err(BridgeError::InvalidConfig(
+            "펌웨어 기능 리포트 프로토콜 버전이 올바르지 않습니다.".into(),
+        ));
+    }
+    if config_body_length < 15 {
+        return Err(BridgeError::InvalidConfig(format!(
+            "펌웨어 기능 리포트의 설정 길이가 너무 짧습니다: {}바이트",
+            config_body_length
+        )));
+    }
+
     Ok(FirmwareCapabilities {
-        protocol_version: payload[4],
-        config_version: payload[5],
-        config_body_length: payload[6],
+        protocol_version,
+        config_version,
+        config_body_length,
         feature_flags,
         supports_battery: feature_flags & (1 << 0) != 0,
         supports_rssi: feature_flags & (1 << 1) != 0,
