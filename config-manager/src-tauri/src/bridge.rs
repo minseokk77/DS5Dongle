@@ -82,6 +82,7 @@ pub struct FirmwareCapabilities {
     pub protocol_version: u8,
     pub config_version: u8,
     pub config_body_length: u8,
+    pub build_channel: Option<String>,
     pub feature_flags: u32,
     pub supports_battery: bool,
     pub supports_rssi: bool,
@@ -588,6 +589,16 @@ fn read_capabilities_from_device(
     }
 
     let feature_flags = u32::from_le_bytes(payload[8..12].try_into().unwrap());
+    let build_channel = payload.get(12).and_then(|length| {
+        let start = 13;
+        let end = start + usize::from(*length);
+        payload
+            .get(start..end)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    });
     let protocol_version = payload[4];
     let config_version = payload[5];
     let config_body_length = payload[6];
@@ -607,6 +618,7 @@ fn read_capabilities_from_device(
         protocol_version,
         config_version,
         config_body_length,
+        build_channel,
         feature_flags,
         supports_battery: feature_flags & (1 << 0) != 0,
         supports_rssi: feature_flags & (1 << 1) != 0,

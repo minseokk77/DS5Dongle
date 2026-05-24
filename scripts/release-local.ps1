@@ -4,7 +4,9 @@
 
   [string]$Repository = "minseokk77/DS5Dongle",
 
-  [string]$FirmwareUf2Path = ""
+  [string]$FirmwareUf2Path = "",
+
+  [switch]$NoBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -92,22 +94,27 @@ try {
   git push origin main
   git push --force origin $Tag
 
-  Push-Location $configManager
-  try {
-    pnpm.cmd install --frozen-lockfile
-  }
-  finally {
-    Pop-Location
-  }
+  if (-not $NoBuild) {
+    Push-Location $configManager
+    try {
+      pnpm.cmd install --frozen-lockfile
+    }
+    finally {
+      Pop-Location
+    }
 
-  & (Join-Path $repoRoot "scripts\pre-release-check.ps1") -Repository $Repository
+    & (Join-Path $repoRoot "scripts\pre-release-check.ps1") -Repository $Repository
 
-  Push-Location $configManager
-  try {
-    pnpm.cmd tauri build
+    Push-Location $configManager
+    try {
+      pnpm.cmd tauri build
+    }
+    finally {
+      Pop-Location
+    }
   }
-  finally {
-    Pop-Location
+  else {
+    Write-Host "NoBuild 옵션이 켜져 있어 앱 빌드와 사전 체크를 건너뜁니다."
   }
 
   $bundleRoot = Join-Path $configManager "src-tauri\target\release\bundle"
@@ -133,7 +140,9 @@ try {
 
   if ($FirmwareUf2Path) {
     $resolvedUf2 = (Resolve-Path -LiteralPath $FirmwareUf2Path).Path
-    $assets += $resolvedUf2
+    $stagedUf2 = Join-Path $assetStage "ds5-bridge-debug-$Tag.uf2"
+    Copy-Item -LiteralPath $resolvedUf2 -Destination $stagedUf2 -Force
+    $assets += $stagedUf2
   }
 
   if ($assets.Count -eq 0) {

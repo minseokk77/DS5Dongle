@@ -32,6 +32,13 @@ constexpr uint32_t FEATURE_FLAGS =
     FEATURE_STICK_CALIBRATION |
     FEATURE_DIRECTIONAL_STICK_CALIBRATION;
 
+constexpr const char *BUILD_CHANNEL =
+#if ENABLE_VERBOSE
+    "debug";
+#else
+    "release";
+#endif
+
 bool is_pico_cmd(uint8_t report_id) {
     if (report_id == 0xf6 ||
         report_id == 0xf7 ||
@@ -64,7 +71,7 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
     if (report_id == 0xfa) {
         printf("[HID] Receive 0xfa getting capabilities\n");
         static_assert(sizeof(Config_body) <= 255);
-        uint8_t capabilities[12] = {
+        uint8_t capabilities[24] = {
             'D', '5', 'C', 'P',
             CAPABILITY_PROTOCOL_VERSION,
             get_config().config_version,
@@ -75,6 +82,9 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
             static_cast<uint8_t>((FEATURE_FLAGS >> 16) & 0xff),
             static_cast<uint8_t>((FEATURE_FLAGS >> 24) & 0xff),
         };
+        const auto channel_len = std::min(strlen(BUILD_CHANNEL), sizeof(capabilities) - 13);
+        capabilities[12] = static_cast<uint8_t>(channel_len);
+        memcpy(capabilities + 13, BUILD_CHANNEL, channel_len);
         const auto len = std::min(sizeof(capabilities), static_cast<size_t>(reqlen));
         memcpy(buffer, capabilities, len);
         return len;

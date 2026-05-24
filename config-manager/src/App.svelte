@@ -21,7 +21,8 @@
     saveConfig,
     type BridgeConfig,
     type BridgeDevice,
-    type DeviceInfo
+    type DeviceInfo,
+    type FirmwareCapabilities
   } from './lib/api';
 
   type ThemeMode = 'light' | 'dark' | 'system';
@@ -33,6 +34,14 @@
     time: string;
     kind: DiagnosticKind;
     message: string;
+    data?: unknown;
+  }
+
+  interface ConfigMismatch {
+    field: keyof BridgeConfig;
+    expected: unknown;
+    actual: unknown;
+    tolerance?: number;
   }
 
   interface FirmwareCapability {
@@ -226,13 +235,14 @@
     }, 4200);
   }
 
-  function addLog(message: string, kind: DiagnosticKind = 'info') {
+  function addLog(message: string, kind: DiagnosticKind = 'info', data?: unknown) {
     diagnosticLogs = [
       {
         id: Date.now(),
         time: new Date().toLocaleTimeString(),
         kind,
-        message
+        message,
+        ...(data === undefined ? {} : { data })
       },
       ...diagnosticLogs
     ].slice(0, 40);
@@ -356,21 +366,21 @@
     return `X ${centerX.toFixed(3)} / Y ${centerY.toFixed(3)} · ${deadzone.toFixed(1)}%`;
   }
 
-  function configMismatchDetails(verified: BridgeConfig, expected: BridgeConfig) {
-    const details: string[] = [];
+  function configMismatchDetails(verified: BridgeConfig, expected: BridgeConfig): ConfigMismatch[] {
+    const details: ConfigMismatch[] = [];
     const stickTolerance = 1 / 127 + 0.001;
     const percentTolerance = 0.051;
     const floatTolerance = 0.001;
 
     const checkExact = (field: keyof BridgeConfig) => {
       if (verified[field] !== expected[field]) {
-        details.push(`${String(field)}: expected=${String(expected[field])}, actual=${String(verified[field])}`);
+        details.push({ field, expected: expected[field], actual: verified[field] });
       }
     };
 
     const checkBool = (field: keyof BridgeConfig) => {
       if (Boolean(verified[field]) !== Boolean(expected[field])) {
-        details.push(`${String(field)}: expected=${Boolean(expected[field])}, actual=${Boolean(verified[field])}`);
+        details.push({ field, expected: Boolean(expected[field]), actual: Boolean(verified[field]) });
       }
     };
 
@@ -378,7 +388,7 @@
       const actual = Number(verified[field] ?? 0);
       const expectedValue = Number(expected[field] ?? 0);
       if (Math.abs(actual - expectedValue) > tolerance) {
-        details.push(`${String(field)}: expected=${expectedValue}, actual=${actual}, tolerance=${tolerance}`);
+        details.push({ field, expected: expectedValue, actual, tolerance });
       }
     };
 
@@ -416,8 +426,14 @@
     const verified = await readConfig(deviceId);
     const mismatchDetails = configMismatchDetails(verified, nextConfig);
     if (mismatchDetails.length > 0) {
-      addLog(text.settingsVerifyMismatch, 'error');
-      mismatchDetails.forEach((detail) => addLog(`${text.settingsVerifyMismatch}: ${detail}`, 'error'));
+      addLog(text.settingsVerifyMismatch, 'error', { mismatches: mismatchDetails });
+      mismatchDetails.forEach((detail) =>
+        addLog(
+          `${text.settingsVerifyMismatch}: ${String(detail.field)} expected=${String(detail.expected)}, actual=${String(detail.actual)}`,
+          'error',
+          detail
+        )
+      );
       showToast(text.settingsVerifyMismatch, 'error');
     }
     config = verified;
@@ -444,6 +460,7 @@
         rssi_error: deviceInfo.rssi_error ?? null,
         capabilities_error: deviceInfo.capabilities_error ?? null
       },
+      capabilities: deviceInfo.capabilities ?? null,
       logs: diagnosticLogs
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
@@ -737,7 +754,54 @@
     return '';
   }
 
-  async function restoreConfigAfterFirmwareUpdate(preservedConfig: BridgeConfig | null, previousDeviceId: string) {
+  async function verifyFirmwareAfterUpdate(deviceId: string, expectedVersion: string) {
+    if (!deviceId) {
+      return;
+    }
+
+    const summary: {
+      expected_version: string;
+      firmware_version?: string | null;
+      config_version?: number;
+      capabilities?: FirmwareCapabilities | null;
+      errors: string[];
+    } = {
+      expected_version: expectedVersion,
+      errors: []
+    };
+
+    try {
+      const info = await readDeviceInfo(deviceId);
+      deviceInfo = info;
+      summary.firmware_version = info.firmware_version;
+      summary.capabilities = info.capabilities ?? null;
+      if (!isCurrentFirmware(expectedVersion)) {
+        summary.errors.push(`firmware_version=${info.firmware_version ?? text.unknown}`);
+      }
+      if (info.capabilities_error) {
+        summary.errors.push(`capabilities=${info.capabilities_error}`);
+      }
+    } catch (error) {
+      summary.errors.push(`device_info=${error instanceof Error ? error.message : text.errorUnknown}`);
+    }
+
+    try {
+      const verifiedConfig = await readConfig(deviceId);
+      config = verifiedConfig;
+      originalConfig = structuredClone(verifiedConfig);
+      summary.config_version = verifiedConfig.config_version;
+    } catch (error) {
+      summary.errors.push(`config=${error instanceof Error ? error.message : text.errorUnknown}`);
+    }
+
+    if (summary.errors.length > 0) {
+      addLog(`${text.status.updated}: ${text.viewLogs}`, 'error', summary);
+    } else {
+      addLog(`${text.status.updated}: ${expectedVersion}`, 'info', summary);
+    }
+  }
+
+  async function restoreConfigAfterFirmwareUpdate(preservedConfig: BridgeConfig | null, previousDeviceId: string, expectedVersion: string) {
     if (!preservedConfig || !previousDeviceId) {
       return false;
     }
@@ -759,6 +823,7 @@
       try {
         await saveAndVerify(restoredDeviceId, preservedConfig);
         await readAll();
+        await verifyFirmwareAfterUpdate(restoredDeviceId, expectedVersion);
         statusOverride = '';
         addLog(text.settingsRestored);
         return true;
@@ -822,7 +887,10 @@
     }
     addLog(`${text.status.updated}: ${result.version} / ${result.asset_name}`);
     const shouldRestoreSettings = Boolean(preservedConfig && previousDeviceId);
-    const settingsRestored = await restoreConfigAfterFirmwareUpdate(preservedConfig, previousDeviceId);
+    const settingsRestored = await restoreConfigAfterFirmwareUpdate(preservedConfig, previousDeviceId, result.version);
+    if (!shouldRestoreSettings && selectedDeviceId) {
+      await verifyFirmwareAfterUpdate(selectedDeviceId, result.version);
+    }
     if (shouldRestoreSettings && !settingsRestored) {
       if (options.automatic) {
         statusCode = previousStatus;
