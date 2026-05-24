@@ -42,6 +42,30 @@ if ($releaseVersion -match '^0\.0\.(\d+)\.(\d+)$') {
   $assetVersionCandidates += "0.$($Matches[1]).$($Matches[2])"
 }
 
+function New-ReleaseNotesFile {
+  param(
+    [string]$Tag,
+    [string]$Repository,
+    [string]$AssetStage
+  )
+
+  $notesPath = Join-Path $AssetStage "release-notes-$($Tag.TrimStart('v')).md"
+  $notes = @"
+로컬 빌드 릴리즈입니다.
+
+- GitHub Actions는 사용하지 않았습니다.
+- 앱 설치 파일과 debug UF2를 로컬에서 빌드해 업로드했습니다.
+- 앱과 펌웨어 업데이트 경로는 $Repository 릴리즈를 기준으로 동작합니다.
+- 공식 DS5Dongle 기반: v0.6.0-hotfix
+
+업데이트 전 USB를 분리하지 말고, 앱의 펌웨어 업데이트 진행 창이 완료될 때까지 기다려 주세요.
+"@
+
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($notesPath, $notes, $utf8NoBom)
+  return $notesPath
+}
+
 Push-Location $repoRoot
 try {
   $dirty = git status --porcelain
@@ -95,11 +119,16 @@ try {
     throw "업로드할 릴리즈 에셋을 찾지 못했습니다."
   }
 
+  $releaseNotesPath = New-ReleaseNotesFile -Tag $Tag -Repository $Repository -AssetStage $assetStage
+
   $releaseTags = @(gh release list --repo $Repository --limit 100 --json tagName --jq '.[].tagName')
   $releaseExists = $releaseTags -contains $Tag
 
   if (-not $releaseExists) {
-    gh release create $Tag --repo $Repository --title $Tag --notes "로컬 빌드 릴리즈입니다. GitHub Actions는 사용하지 않습니다."
+    gh release create $Tag --repo $Repository --title $Tag --notes-file $releaseNotesPath
+  }
+  else {
+    gh release edit $Tag --repo $Repository --title $Tag --notes-file $releaseNotesPath
   }
 
   gh release upload $Tag --repo $Repository @assets --clobber
