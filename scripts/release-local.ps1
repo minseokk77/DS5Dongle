@@ -28,6 +28,20 @@ if (-not (Test-Path -LiteralPath $configManager)) {
   throw "config-manager 폴더를 찾지 못했습니다."
 }
 
+if ($Tag -notmatch '^v0\.0\.\d+\.\d+$') {
+  throw "릴리즈 태그는 v0.0.x.x 형식이어야 합니다. 예: v0.0.1.4"
+}
+
+$releaseVersion = $Tag.TrimStart("v")
+$assetVersionCandidates = @($releaseVersion)
+if ($releaseVersion -match '^0\.0\.(\d+)\.(\d+)$') {
+  # Tauri/Cargo/MSI는 3자리 semver만 안정적으로 처리하므로,
+  # v0.0.1.4 같은 릴리즈는 앱 번들 0.0.14와 매칭해서 업로드합니다.
+  $compactPatch = "$($Matches[1])$($Matches[2])"
+  $assetVersionCandidates += "0.0.$compactPatch"
+  $assetVersionCandidates += "0.$($Matches[1]).$($Matches[2])"
+}
+
 Push-Location $repoRoot
 try {
   $dirty = git status --porcelain
@@ -52,11 +66,25 @@ try {
   }
 
   $bundleRoot = Join-Path $configManager "src-tauri\target\release\bundle"
-  $assetVersion = $Tag.TrimStart("v")
+  $assetStage = Join-Path $repoRoot "target\release-assets\$releaseVersion"
+  New-Item -ItemType Directory -Force -Path $assetStage | Out-Null
   $assets = @()
-  $assets += Get-ChildItem -LiteralPath $bundleRoot -Recurse -File |
-    Where-Object { $_.Extension -in ".exe", ".msi" -and $_.Name -like "*$assetVersion*" } |
-    Select-Object -ExpandProperty FullName
+  $bundleAssets = Get-ChildItem -LiteralPath $bundleRoot -Recurse -File |
+    Where-Object {
+      $assetName = $_.Name
+      $_.Extension -in ".exe", ".msi" -and
+      [bool]($assetVersionCandidates | Where-Object { $assetName -like "*$_*" } | Select-Object -First 1)
+    }
+
+  foreach ($asset in $bundleAssets) {
+    $stagedName = $asset.Name
+    if ($stagedName -notlike "*$releaseVersion*") {
+      $stagedName = $stagedName -replace '\d+\.\d+\.\d+(?:\.\d+)?', $releaseVersion
+    }
+    $stagedPath = Join-Path $assetStage $stagedName
+    Copy-Item -LiteralPath $asset.FullName -Destination $stagedPath -Force
+    $assets += $stagedPath
+  }
 
   if ($FirmwareUf2Path) {
     $resolvedUf2 = (Resolve-Path -LiteralPath $FirmwareUf2Path).Path

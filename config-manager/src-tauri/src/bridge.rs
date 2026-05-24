@@ -170,7 +170,9 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     let rssi_val = rssi_result.as_ref().ok().and_then(|v| *v);
     let battery_report_available = battery_level.is_some();
     let rssi_report_available = rssi_val.is_some();
-    let controller_connected = battery_report_available || rssi_report_available;
+    // RSSI 리포트는 Pico만 연결된 상태에서도 0 dBm처럼 보일 수 있습니다.
+    // DualSense 연결 UI는 실제 컨트롤러 상태를 나타내야 하므로 배터리 리포트 수신 여부로 판정합니다.
+    let controller_connected = battery_report_available;
     let config_readable = read_config(device_id).is_ok();
 
     let manufacturer = device
