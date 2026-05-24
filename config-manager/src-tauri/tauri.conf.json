@@ -11,10 +11,10 @@
     "windows": [
       {
         "title": "DS5 Dongle Config",
-        "width": 980,
-        "height": 635,
-        "minWidth": 780,
-        "minHeight": 550,
+        "width": 1230,
+        "height": 895,
+        "minWidth": 980,
+        "minHeight": 720,
         "resizable": true,
         "fullscreen": false,
         "decorations": true

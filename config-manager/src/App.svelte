@@ -99,6 +99,7 @@
   let showSettingsModal = false;
   let diagnosticLogs: DiagnosticLog[] = [];
   let updateStep: UpdateStepCode = 'idle';
+  let showUpdateProgressModal = false;
 
   $: text = i18n[lang];
   $: effectiveTheme = themeMode === 'system' ? systemTheme : themeMode;
@@ -124,6 +125,7 @@
   $: firmwareCapabilities = buildFirmwareCapabilities();
   $: updateStepText = updateStep === 'idle' ? '' : text.updateSteps[updateStep];
   $: updateProgress = updateStepProgress(updateStep);
+  $: updateStepItems = buildUpdateStepItems();
   $: calibrationEnabled = Boolean(config.stick_calibration_enabled);
   $: leftCalibrationSummary = calibrationSummary(
     config.left_stick_center_x,
@@ -313,6 +315,35 @@
     return Math.max(0, Math.round((Math.max(index, 0) / 7) * 100));
   }
 
+  function buildUpdateStepItems() {
+    const order: UpdateStepCode[] = ['backup', 'checking', 'bootloader', 'copying', 'waiting', 'restoring', 'done'];
+    const activeIndex = order.indexOf(updateStep);
+
+    return order.map((step, index) => ({
+      step,
+      label: text.updateSteps[step],
+      state:
+        updateStep === 'failed' || updateStep === 'latest'
+          ? 'waiting'
+          : index < activeIndex || updateStep === 'done'
+            ? 'done'
+            : index === activeIndex
+              ? 'active'
+              : 'waiting'
+    }));
+  }
+
+  function finishUpdateProgressModal() {
+    if (updateStep !== 'done' && updateStep !== 'latest') {
+      return;
+    }
+
+    window.setTimeout(() => {
+      showUpdateProgressModal = false;
+      updateStep = 'idle';
+    }, 1400);
+  }
+
   function calibrationSummary(centerX?: number, centerY?: number, deadzone?: number) {
     if (centerX === undefined || centerY === undefined || deadzone === undefined) return '';
     return `X ${centerX.toFixed(3)} / Y ${centerY.toFixed(3)} · ${deadzone.toFixed(1)}%`;
@@ -484,19 +515,37 @@
   }
 
   async function onFirmwareUpdate() {
-    await runTask(() => performFirmwareUpdate({ automatic: false }));
+    showUpdateProgressModal = true;
+    updateStep = 'checking';
+    await runTask(async () => {
+      try {
+        await performFirmwareUpdate({ automatic: false });
+      } catch (error) {
+        updateStep = 'failed';
+        throw error;
+      }
+    });
+    finishUpdateProgressModal();
   }
 
   async function onRecoveryFirmwareUpdate() {
+    showUpdateProgressModal = true;
     await runTask(async () => {
       updateStep = 'copying';
       setStatus('updating');
-      const result = await recoveryFlashLatestDebugFirmware();
+      let result;
+      try {
+        result = await recoveryFlashLatestDebugFirmware();
+      } catch (error) {
+        updateStep = 'failed';
+        throw error;
+      }
       updateStep = 'done';
       addLog(`${text.recoveryFirmwareUpdate}: ${result.version} / ${result.asset_name}`);
       showToast(`${text.status.updated}: ${result.version}`);
       await syncDevicePresence();
     });
+    finishUpdateProgressModal();
   }
 
   async function onCalibrationApply(
@@ -673,7 +722,7 @@
   }
 </script>
 
-<main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell" class:modal-open={showInputTesterModal || showSettingsModal}>
+<main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell" class:modal-open={showInputTesterModal || showSettingsModal || showUpdateProgressModal}>
   <header class="topbar">
     <div class="brand">
       <div class="brand-icon">
@@ -779,18 +828,35 @@
     onRecoveryFirmwareUpdate={onRecoveryFirmwareUpdate}
   />
 
-  {#if updateStep !== 'idle'}
+  {#if showUpdateProgressModal}
     <div class="update-progress-overlay" role="presentation">
       <div class="update-progress-modal" role="status" aria-label={text.firmwareUpdateProgress}>
-        <h2>{text.firmwareUpdateProgress}</h2>
-        <p>{updateStepText}</p>
+        <div class="update-progress-head">
+          <h2><Icon name="download" size={18} /> {text.firmwareUpdateProgress}</h2>
+          <p>{text.firmwareUpdateProgressDesc}</p>
+        </div>
+        <div class="update-progress-current">
+          <strong>{updateStepText || text.updateSteps.checking}</strong>
+          <span>{updateProgress}%</span>
+        </div>
         <div class="progress-track"><span style={`width: ${updateProgress}%`}></span></div>
-        <strong>{updateProgress}%</strong>
+        <div class="update-progress-asset">
+          {settingsFirmwareVersion} / ds5-bridge-debug-{settingsFirmwareVersion}.uf2
+        </div>
+        <div class="update-step-grid">
+          {#each updateStepItems as item}
+            <div class={`update-step-card ${item.state}`}>
+              <span></span>
+              <strong>{item.label}</strong>
+            </div>
+          {/each}
+        </div>
+        <p class="update-progress-footnote">{text.firmwareUpdateProgressFootnote}</p>
       </div>
     </div>
   {/if}
 
-  {#if showInputTesterModal || showSettingsModal}
+  {#if showInputTesterModal || showSettingsModal || showUpdateProgressModal}
     <!-- 모달이 열린 동안 배경 클릭을 차단합니다. -->
     <div 
       class="global-click-blocker" 
