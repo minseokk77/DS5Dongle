@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "DS5 Dongle Config",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "identifier": "local.ds5.bridge.config",
   "build": {
     "beforeBuildCommand": "pnpm build",
