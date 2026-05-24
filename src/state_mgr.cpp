@@ -14,6 +14,19 @@ namespace {
     constexpr size_t kAudioControl2Offset = kMotorPowerLevelOffset + sizeof(uint8_t);
     constexpr size_t kHapticLowPassFilterOffset = offsetof(SetStateData, LightFadeAnimation) - 2 * sizeof(uint8_t);
     constexpr size_t kPlayerIndicatorsOffset = offsetof(SetStateData, LedRed) - sizeof(uint8_t);
+
+    struct LightStateBackup {
+        uint8_t flags1;
+        uint8_t flags38;
+        uint8_t fade;
+        uint8_t brightness;
+        uint8_t red;
+        uint8_t green;
+        uint8_t blue;
+    };
+
+    LightStateBackup low_battery_backup{};
+    bool low_battery_backup_valid = false;
 }
 
 static constexpr uint8_t state_init_data[63] = {
@@ -162,4 +175,42 @@ void state_set_mic_muted(const bool muted) {
 
 bool state_get_mic_muted() {
     return (state[9] & (1 << 4)) != 0;
+}
+
+void state_set_low_battery_warning(const bool active, const bool light_on) {
+    if (!active) {
+        if (low_battery_backup_valid) {
+            state[1] = low_battery_backup.flags1;
+            state[38] = low_battery_backup.flags38;
+            state[41] = low_battery_backup.fade;
+            state[42] = low_battery_backup.brightness;
+            state[44] = low_battery_backup.red;
+            state[45] = low_battery_backup.green;
+            state[46] = low_battery_backup.blue;
+            low_battery_backup_valid = false;
+        }
+        return;
+    }
+
+    if (!low_battery_backup_valid) {
+        low_battery_backup = {
+            state[1],
+            state[38],
+            state[41],
+            state[42],
+            state[44],
+            state[45],
+            state[46],
+        };
+        low_battery_backup_valid = true;
+    }
+
+    set_bit(state[1], 2, true);   // AllowLedColor
+    set_bit(state[38], 0, true);  // AllowLightBrightnessChange
+    set_bit(state[38], 1, true);  // AllowColorLightFadeAnimation
+    state[41] = LightFadeAnimation::Nothing;
+    state[42] = LightBrightness::Bright;
+    state[44] = light_on ? 0xff : 0x00;
+    state[45] = 0x00;
+    state[46] = 0x00;
 }

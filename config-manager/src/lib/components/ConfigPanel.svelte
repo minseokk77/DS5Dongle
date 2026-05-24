@@ -233,21 +233,22 @@
 </script>
 
 <section class="config-panel panel-dark">
-  <div class="section-title" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
-    <div style="display: flex; align-items: center; gap: 8px;">
+  <div class="section-title config-title-row">
+    <div class="config-title-label">
       <span><Icon name="sliders" size={18} /></span>
       <h2 style="margin: 0;">{text.configuration}</h2>
     </div>
 
     <!-- 프리셋 관리 영역 -->
-    <div class="preset-manager" style="display: flex; align-items: center; gap: 8px;">
+    <div class="preset-manager">
       {#if !isSavingMode}
-        <div style="display: flex; align-items: center; gap: 6px;">
+        <div class="preset-controls">
           <select 
             bind:value={selectedPresetId} 
             onchange={handlePresetChange}
             aria-label={text.presets}
-            style="background: var(--control-2); border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; outline: none; cursor: pointer; min-width: 160px; height: 32px;"
+            title={selectedPreset?.name ?? text.selectPreset}
+            class="preset-select"
           >
             <option value="" style="background: var(--control-2); color: var(--muted);">{text.selectPreset}</option>
             
@@ -266,16 +267,16 @@
             {/if}
           </select>
 
-          {#if selectedPreset}
-            <span class:modified={selectedPresetModified} class="preset-state">
-              {selectedPreset.name}{selectedPresetModified ? ` · ${text.modified}` : ''}
+          {#if selectedPresetModified}
+            <span class="preset-state modified">
+              {text.modified}
             </span>
           {/if}
 
           <button 
             type="button" 
             onclick={() => (isSavingMode = true)}
-            style="background: rgba(99, 226, 183, 0.1); border: 1px solid rgba(99, 226, 183, 0.25); color: #63e2b7; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 500; cursor: pointer; height: 32px; display: inline-flex; align-items: center; gap: 4px; transition: background 0.15s;"
+            class="preset-save-btn"
             onmouseenter={(e) => e.currentTarget.style.background = 'rgba(99, 226, 183, 0.2)'}
             onmouseleave={(e) => e.currentTarget.style.background = 'rgba(99, 226, 183, 0.1)'}
           >
@@ -419,8 +420,62 @@
 </section>
 
 <style>
+  .config-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 12px;
+    margin-bottom: 20px;
+    min-width: 0;
+  }
+
+  .config-title-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  .preset-manager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .preset-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .preset-select {
+    background: var(--control-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 32px 6px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    outline: none;
+    cursor: pointer;
+    width: clamp(190px, 34%, 290px);
+    min-width: 150px;
+    max-width: 290px;
+    height: 32px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .preset-state {
-    max-width: 180px;
+    flex: 0 0 auto;
+    max-width: 64px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -430,6 +485,25 @@
 
   .preset-state.modified {
     color: #ffab00;
+  }
+
+  .preset-save-btn {
+    background: rgba(99, 226, 183, 0.1);
+    border: 1px solid rgba(99, 226, 183, 0.25);
+    color: #63e2b7;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transition: background 0.15s;
+    white-space: nowrap;
+    flex: 0 0 auto;
   }
 
   .preset-tool-btn {
@@ -444,8 +518,11 @@
     height: 32px;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 4px;
     transition: filter 0.15s;
+    white-space: nowrap;
+    flex: 0 0 auto;
   }
 
   .preset-tool-btn:hover {
