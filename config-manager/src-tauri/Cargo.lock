@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "ds5-bridge-config-tauri"
-version = "0.1.0"
+version = "0.0.11"
 dependencies = [
  "hidapi",
  "reqwest 0.12.28",
@@ -657,7 +657,9 @@ dependencies = [
  "tauri",
  "tauri-build",
  "thiserror 2.0.18",
+ "tokio",
  "toml 0.9.12+spec-1.1.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-﻿import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 
 export type PollingRateMode = 0 | 1 | 2;
 export type ControllerMode = 0 | 1 | 2;
@@ -21,6 +21,21 @@ export interface BridgeConfig {
   polling_rate_mode: PollingRateMode;
   haptics_buffer_length: number;
   controller_mode: ControllerMode;
+  stick_calibration_enabled?: boolean;
+  left_stick_center_x?: number;
+  left_stick_center_y?: number;
+  left_stick_deadzone?: number;
+  right_stick_center_x?: number;
+  right_stick_center_y?: number;
+  right_stick_deadzone?: number;
+  left_stick_min_x?: number;
+  left_stick_max_x?: number;
+  left_stick_min_y?: number;
+  left_stick_max_y?: number;
+  right_stick_min_x?: number;
+  right_stick_max_x?: number;
+  right_stick_min_y?: number;
+  right_stick_max_y?: number;
 }
 
 export interface DeviceInfo {
@@ -28,6 +43,12 @@ export interface DeviceInfo {
   rssi?: number | null;
   firmware_error?: string | null;
   rssi_error?: string | null;
+  usb_vendor_name: string;
+  usb_speed_class: string;
+  rssi_strength_label: string;
+  battery_level?: number | null;
+  is_charging?: boolean | null;
+  controller_connected?: boolean;
 }
 
 export interface FirmwareUpdateInfo {
@@ -90,11 +111,49 @@ export async function reconnectUsb(deviceId: string): Promise<void> {
   }
 }
 
+export async function testVibration(
+  deviceId: string,
+  weakMagnitude: number,
+  strongMagnitude: number,
+  durationMs: number
+): Promise<void> {
+  try {
+    await invoke('test_vibration', {
+      deviceId,
+      weakMagnitude,
+      strongMagnitude,
+      durationMs
+    });
+  } catch (error) {
+    throw friendlyError(error, '진동 테스트 명령을 보내지 못했습니다.');
+  }
+}
+
+export async function testAdaptiveTrigger(
+  deviceId: string,
+  side: 'left' | 'right',
+  startPosition: number,
+  strength: number,
+  durationMs: number
+): Promise<void> {
+  try {
+    await invoke('test_adaptive_trigger', {
+      deviceId,
+      side,
+      startPosition,
+      strength,
+      durationMs
+    });
+  } catch (error) {
+    throw friendlyError(error, '적응형 트리거 테스트 명령을 보내지 못했습니다.');
+  }
+}
+
 export async function checkDebugFirmwareUpdate(): Promise<FirmwareUpdateInfo> {
   try {
     return await invoke<FirmwareUpdateInfo>('check_debug_firmware_update');
   } catch (error) {
-    throw friendlyError(error, '공식 debug 펌웨어 업데이트를 확인하지 못했습니다.');
+    throw friendlyError(error, '펌웨어 업데이트를 확인하지 못했습니다.');
   }
 }
 
@@ -102,7 +161,15 @@ export async function flashLatestDebugFirmware(deviceId?: string): Promise<Firmw
   try {
     return await invoke<FirmwareFlashResult>('flash_latest_debug_firmware', { deviceId });
   } catch (error) {
-    throw friendlyError(error, '공식 debug 펌웨어를 업데이트하지 못했습니다.');
+    throw friendlyError(error, '펌웨어를 업데이트하지 못했습니다.');
+  }
+}
+
+export async function recoveryFlashLatestDebugFirmware(): Promise<FirmwareFlashResult> {
+  try {
+    return await invoke<FirmwareFlashResult>('recovery_flash_latest_debug_firmware');
+  } catch (error) {
+    throw friendlyError(error, '복구 펌웨어 업데이트를 완료하지 못했습니다.');
   }
 }
 

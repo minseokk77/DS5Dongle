@@ -1,6 +1,6 @@
 [package]
 name = "ds5-bridge-config-tauri"
-version = "0.1.0"
+version = "0.0.11"
 description = "DS5 Bridge Config Manager"
 authors = ["minse"]
 edition = "2024"
@@ -21,6 +21,8 @@ tauri = { version = "2.9.4", features = [] }
 thiserror = "2"
 toml = "0.9"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+tokio = { version = "1", features = ["time"] }
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_System_Registry"] }
 
 [profile.release]
 codegen-units = 1

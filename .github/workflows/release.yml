@@ -144,3 +144,52 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" artifacts/*.uf2 --clobber
+
+  build-config-manager:
+    name: Build and upload Windows config manager
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: config-manager
+        run: pnpm install --frozen-lockfile
+
+      - name: Build config manager
+        working-directory: config-manager
+        run: pnpm tauri build
+
+      - name: Collect app artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          Get-ChildItem -Path config-manager/src-tauri/target/release/bundle -Recurse -File |
+            Where-Object { $_.Extension -in '.exe', '.msi' } |
+            Copy-Item -Destination artifacts -Force
+          if (-not (Get-ChildItem -Path artifacts -File)) {
+            throw "No Windows config manager artifacts were generated."
+          }
+
+      - name: Upload config manager artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release upload "${{ github.event.release.tag_name }}" artifacts/* --clobber

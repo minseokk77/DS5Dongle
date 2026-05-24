@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --bg: #070d1c;
   color: #f4f4f5;
   background: var(--bg);
@@ -31,15 +31,33 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   --primary-hover: #1d55df;
   --connect-bg: #ececec;
   --connect-text: #111111;
+  --modal-bg: #1f1f25;
+  --modal-text: #f4f4f5;
+  --modal-muted: #a4a4ad;
+  --modal-field-bg: #2a2a31;
+  --modal-field-border: rgba(255, 255, 255, 0.08);
+  --modal-close-bg: #34343b;
+  --modal-close-hover: #42424a;
+  --tester-bg: #1f1f25;
+  --tester-text: #f4f4f5;
+  --tester-muted: #a4a4ad;
+  --tester-soft: #303035;
+  --tester-card: #1b1b21;
+  --tester-card-border: rgba(255, 255, 255, 0.08);
+  --tester-chip-bg: #2a2a31;
+  --meta-text: #d7d7dc;
+  --meta-faint: #8d8d96;
+  --empty-meter: #4a4a50;
+  --battery-outline: #b9b9c0;
   --shadow: none;
   --card-shadow: none;
   width: 100vw;
-  min-height: 100vh;
+  height: 100vh;
   margin: 0 auto;
   padding: 12px;
   display: grid;
-  grid-template-rows: auto auto auto;
-  align-content: start;
+  grid-template-rows: auto auto 1fr;
+  align-content: stretch;
   gap: 12px;
   color: var(--text);
   background: var(--bg);
@@ -62,6 +80,24 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   --primary-hover: #7394ea;
   --connect-bg: #171717;
   --connect-text: #ffffff;
+  --modal-bg: #ffffff;
+  --modal-text: #0f172a;
+  --modal-muted: #647083;
+  --modal-field-bg: #f7f7f8;
+  --modal-field-border: rgba(15, 23, 42, 0.1);
+  --modal-close-bg: #eef0f3;
+  --modal-close-hover: #e2e5e9;
+  --tester-bg: #ffffff;
+  --tester-text: #0f172a;
+  --tester-muted: #647083;
+  --tester-soft: #f0f1f3;
+  --tester-card: #f7f7f8;
+  --tester-card-border: rgba(15, 23, 42, 0.1);
+  --tester-chip-bg: #eef0f3;
+  --meta-text: #334155;
+  --meta-faint: #7c8594;
+  --empty-meter: #d2d6dd;
+  --battery-outline: #647083;
   --shadow: 0 1px 2px rgba(15, 23, 42, .08), 0 8px 24px rgba(15, 23, 42, .04);
   --card-shadow: 0 1px 2px rgba(15, 23, 42, .06);
 }
@@ -76,32 +112,46 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 }
 
 .topbar {
-  min-height: 70px;
+  min-height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding: 10px 14px;
+  padding: 9px 13px;
 }
 
 .brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .brand-icon {
-  width: 46px;
-  height: 46px;
+  width: 42px;
+  height: 42px;
   border-radius: 12px;
-  display: grid;
-  place-items: center;
-  position: relative;
-  background: linear-gradient(145deg, #1d2f52, #101827);
-  color: #7fb0ff;
+  display: block;
+  overflow: hidden;
+  background: #111827;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
 }
-.theme-light .brand-icon { background: #101827; color: #78a9ff; }
-.brand-icon .wifi { position: absolute; top: 4px; color: #77a6ff; }
-.brand-icon .pad { display: grid; place-items: center; color: #7faaff; }
-h1 { margin: 0; font-size: clamp(1.45rem, 3vw, 2.05rem); font-weight: 450; letter-spacing: .01em; }
+.brand-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
+h1 { margin: 0; font-size: clamp(1.35rem, 3vw, 1.92rem); font-weight: 450; letter-spacing: .01em; }
 
 .toolbar { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.compact-toolbar { flex: 0 0 auto; }
+.settings-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: var(--control-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--card-shadow);
+  transition: filter 0.15s, border-color 0.15s, background 0.15s;
+}
+.settings-btn:hover {
+  filter: brightness(1.08);
+  border-color: color-mix(in srgb, var(--border) 60%, var(--text) 25%);
+}
 .translate { display: grid; place-items: center; color: var(--subtle); }
 .seg {
   display: inline-grid;
@@ -191,12 +241,12 @@ h1 { margin: 0; font-size: clamp(1.45rem, 3vw, 2.05rem); font-weight: 450; lette
 .toast button { margin-left: auto; color: inherit; background: transparent; font-size: 16px; }
 
 .device-card {
-  min-height: 74px;
+  min-height: 66px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 13px 14px;
+  padding: 10px 13px;
 }
 .device-left { display: flex; align-items: center; gap: 13px; min-width: 0; }
 .square-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--control-2); display: grid; place-items: center; color: var(--text); }
@@ -208,35 +258,35 @@ h1 { margin: 0; font-size: clamp(1.45rem, 3vw, 2.05rem); font-weight: 450; lette
 select { height: 36px; max-width: 260px; color: var(--text); background: var(--control-2); border: 1px solid var(--border); border-radius: 9px; padding: 0 10px; font-size: .88rem; }
 .light-btn { height: 34px; padding: 0 13px; border-radius: 9px; background: var(--connect-bg); color: var(--connect-text); font-size: .88rem; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; box-shadow: var(--card-shadow); }
 
-.main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 254px; gap: 12px; margin-top: 0; min-height: 0; align-items: start; }
-.panel-dark { padding: 12px; }
+.main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 254px; gap: 12px; margin-top: 0; min-height: 0; height: 100%; align-items: stretch; }
+.panel-dark { padding: 10px; }
 .config-panel,
-.actions-panel { align-self: start; }
-.section-title { display: flex; align-items: center; gap: 8px; margin-bottom: 13px; }
+.actions-panel { align-self: stretch; height: 100%; }
+.section-title { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .section-title h2 { margin: 0; font-size: 1rem; font-weight: 800; }
 .section-title span { display: grid; place-items: center; color: var(--text); }
-.cards-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
-.config-card { background: var(--panel-soft); border-radius: 11px; padding: 10px; display: grid; align-content: start; box-shadow: var(--card-shadow); overflow: hidden; }
+.cards-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto minmax(0, 1fr); gap: 10px; align-items: stretch; align-content: stretch; flex-grow: 1; min-height: 0; }
+.config-card { background: var(--panel-soft); border-radius: 11px; padding: 10px; display: grid; align-content: start; box-shadow: var(--card-shadow); overflow: hidden; height: auto; }
 .config-card:not(.compact) {
-  grid-template-rows: 46px repeat(3, 43px);
-  row-gap: 7px;
+  grid-template-rows: 42px repeat(3, 38px);
+  row-gap: 6px;
 }
-.card-head { min-height: 42px; display: flex; gap: 9px; align-items: flex-start; margin-bottom: 8px; }
-.config-card:not(.compact) .card-head { min-height: 46px; margin-bottom: 0; }
+.card-head { min-height: 38px; display: flex; gap: 9px; align-items: flex-start; margin-bottom: 6px; }
+.config-card:not(.compact) .card-head { min-height: 42px; margin-bottom: 0; }
 .card-head > span { width: 25px; display: grid; place-items: start center; color: var(--text); padding-top: 2px; }
 .card-head h3 { margin: 0; font-size: .84rem; font-weight: 560; }
 .card-head p { margin: 2px 0 0; color: var(--muted); font-size: .71rem; line-height: 1.25; }
 
 .control-row,
 .switch-row {
-  height: 43px;
+  height: 38px;
   display: grid;
   align-items: center;
   gap: 8px;
   background: var(--control);
   border-radius: 9px;
   margin-top: 0;
-  padding: 7px 10px;
+  padding: 6px 10px;
   box-shadow: var(--card-shadow);
   overflow: hidden;
 }
@@ -256,7 +306,7 @@ input[type="range"] {
   margin: 0;
   min-width: 0;
 }
-input[type="number"] { width: 56px; min-width: 0; height: 31px; border-radius: 8px; border: 1px solid var(--border); background: var(--control-2); color: var(--text); padding: 0 9px; font-size: .82rem; box-shadow: var(--card-shadow); }
+input[type="number"] { width: 56px; min-width: 0; height: 29px; border-radius: 8px; border: 1px solid var(--border); background: var(--control-2); color: var(--text); padding: 0 9px; font-size: .82rem; box-shadow: var(--card-shadow); }
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
   margin: 0;
@@ -270,8 +320,16 @@ input[type="checkbox"] { appearance: none; width: 32px; height: 18px; border-rad
 input[type="checkbox"]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 999px; background: #e9e9e9; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.18); }
 input[type="checkbox"]:checked { background: var(--primary); }
 input[type="checkbox"]:checked::after { transform: translateX(14px); }
-.config-card.compact { min-height: 145px; padding-top: 14px; }
-.field-label { display: block; margin: 5px 0 7px; }
+.config-card.compact {
+  min-height: 122px;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.config-card.compact .card-head { margin-bottom: 0; }
+.config-card.compact .field-label { margin-top: auto; }
+.field-label { display: block; margin: 4px 0 6px; }
 .seg.wide { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }
 .seg.wide button { min-width: 0; font-size: .78rem; }
 
@@ -320,8 +378,9 @@ input[type="checkbox"]:checked::after { transform: translateX(14px); }
   .control-row { grid-template-columns: 1fr; }
 }
 
-.config-panel { overflow: hidden; }
-.actions-panel { overflow: visible; }
+.config-panel { overflow: hidden; display: flex; flex-direction: column; }
+.actions-panel { overflow: visible; display: flex; flex-direction: column; }
+.actions-panel .state-card { margin-top: auto; }
 .config-panel,
 .actions-panel,
 .config-card,
@@ -335,3 +394,81 @@ input[type="checkbox"]:checked::after { transform: translateX(14px); }
 .switch-row strong { min-width: 0; }
 .card-head p,
 .config-card h3 { overflow-wrap: anywhere; }
+
+/* 모달이 열린 동안 메인 화면 입력을 막고 배경을 흐리게 보이게 합니다. */
+.app-shell.modal-open .topbar,
+.app-shell.modal-open .device-card,
+.app-shell.modal-open .main-grid {
+  pointer-events: none !important;
+  user-select: none;
+  filter: blur(0.6px) brightness(75%);
+  transition: filter 0.25s ease, brightness 0.25s ease;
+}
+
+/* 모달 아래 요소로 클릭이 전달되지 않게 하는 투명 오버레이입니다. */
+.global-click-blocker {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+  z-index: 9990;
+  cursor: not-allowed;
+  pointer-events: auto !important;
+}
+
+.update-progress-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(8px);
+}
+
+.update-progress-modal {
+  width: min(420px, calc(100vw - 40px));
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--modal-bg);
+  color: var(--modal-text);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+}
+
+.update-progress-modal h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.update-progress-modal p {
+  margin: 0 0 14px;
+  color: var(--modal-muted);
+  font-size: 0.84rem;
+}
+
+.progress-track {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--control);
+  border: 1px solid var(--border);
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2f6bff;
+  transition: width 0.2s ease;
+}
+
+.update-progress-modal strong {
+  display: block;
+  margin-top: 10px;
+  text-align: right;
+  font-size: 0.82rem;
+}

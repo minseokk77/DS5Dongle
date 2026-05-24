@@ -7,10 +7,12 @@ config_read = 0xf7
 command = 0xf6
 firmware_version = 0xf8
 rssi = 0xf9
+battery = 0xf5
+capabilities = 0xfa
 
 [config]
-version = 1
-body_length = 15
+version = 3
+body_length = 30
 haptics_gain_min = 0.1
 haptics_gain_max = 2.0
 speaker_volume_percent_min = 0.0

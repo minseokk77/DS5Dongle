@@ -32,11 +32,37 @@ pub fn reconnect_usb(device_id: String) -> Result<(), BridgeError> {
 }
 
 #[tauri::command]
-pub fn check_debug_firmware_update() -> Result<FirmwareUpdateInfo, UpdateError> {
-    updater::check_debug_firmware_update()
+pub fn test_vibration(
+    device_id: String,
+    weak_magnitude: f32,
+    strong_magnitude: f32,
+    duration_ms: u16,
+) -> Result<(), BridgeError> {
+    bridge::test_vibration(&device_id, weak_magnitude, strong_magnitude, duration_ms)
 }
 
 #[tauri::command]
-pub fn flash_latest_debug_firmware(device_id: Option<String>) -> Result<FirmwareFlashResult, UpdateError> {
-    updater::flash_latest_debug_firmware(device_id)
+pub fn test_adaptive_trigger(
+    device_id: String,
+    side: String,
+    start_position: f32,
+    strength: f32,
+    duration_ms: u16,
+) -> Result<(), BridgeError> {
+    bridge::test_adaptive_trigger(&device_id, &side, start_position, strength, duration_ms)
+}
+
+#[tauri::command]
+pub async fn check_debug_firmware_update() -> Result<FirmwareUpdateInfo, UpdateError> {
+    updater::check_debug_firmware_update().await
+}
+
+#[tauri::command]
+pub async fn flash_latest_debug_firmware(device_id: Option<String>) -> Result<FirmwareFlashResult, UpdateError> {
+    updater::flash_latest_debug_firmware(device_id).await
+}
+
+#[tauri::command]
+pub async fn recovery_flash_latest_debug_firmware() -> Result<FirmwareFlashResult, UpdateError> {
+    updater::recovery_flash_latest_debug_firmware().await
 }

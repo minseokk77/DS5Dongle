@@ -1,6 +1,14 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
+  import appIcon from './assets/app-icon.svg';
   import Icon from './lib/Icon.svelte';
+  import { i18n, type Lang, type StatusCode } from './lib/i18n';
+  import DeviceCard from './lib/components/DeviceCard.svelte';
+  import ConfigPanel from './lib/components/ConfigPanel.svelte';
+  import ActionPanel from './lib/components/ActionPanel.svelte';
+  import InputTester from './lib/components/InputTester.svelte';
+  import SettingsModal from './lib/components/SettingsModal.svelte';
   import {
     applyConfig,
     checkDebugFirmwareUpdate,
@@ -9,28 +17,33 @@
     readConfig,
     readDeviceInfo,
     reconnectUsb,
+    recoveryFlashLatestDebugFirmware,
     saveConfig,
     type BridgeConfig,
     type BridgeDevice,
     type DeviceInfo
   } from './lib/api';
 
-  type Lang = 'ko' | 'en' | 'zh';
   type ThemeMode = 'light' | 'dark' | 'system';
-  type StatusCode =
-    | 'ready'
-    | 'noDevice'
-    | 'connected'
-    | 'applied'
-    | 'saved'
-    | 'reconnectSent'
-    | 'defaults'
-    | 'updateReady'
-    | 'updated'
-    | 'upToDate';
+  type DiagnosticKind = 'info' | 'error';
+  type UpdateStepCode = 'idle' | 'backup' | 'checking' | 'bootloader' | 'copying' | 'waiting' | 'restoring' | 'done' | 'latest' | 'failed';
+
+  interface DiagnosticLog {
+    id: number;
+    time: string;
+    kind: DiagnosticKind;
+    message: string;
+  }
+
+  interface FirmwareCapability {
+    key: string;
+    label: string;
+    supported: boolean;
+    reason: string;
+  }
 
   const defaultConfig: BridgeConfig = {
-    config_version: 1,
+    config_version: 3,
     haptics_gain: 1,
     speaker_volume_percent: 0,
     inactive_time: 10,
@@ -38,170 +51,26 @@
     disable_pico_led: false,
     polling_rate_mode: 2,
     haptics_buffer_length: 64,
-    controller_mode: 0
+    controller_mode: 0,
+    stick_calibration_enabled: false,
+    left_stick_center_x: 0,
+    left_stick_center_y: 0,
+    left_stick_deadzone: 1,
+    right_stick_center_x: 0,
+    right_stick_center_y: 0,
+    right_stick_deadzone: 1,
+    left_stick_min_x: -1,
+    left_stick_max_x: 1,
+    left_stick_min_y: -1,
+    left_stick_max_y: 1,
+    right_stick_min_x: -1,
+    right_stick_max_x: 1,
+    right_stick_min_y: -1,
+    right_stick_max_y: 1
   };
-
-  const i18n = {
-    ko: {
-      langKo: '한국어',
-      langEn: 'EN',
-      langZh: '中文',
-      connected: '연결됨',
-      disconnected: '연결 끊김',
-      device: '장치',
-      noCompatibleDevice: '호환 장치 없음',
-      unknown: '알 수 없음',
-      firmware: '펌웨어',
-      selectDevice: '장치 선택',
-      connect: '연결',
-      configuration: '설정',
-      feedbackTitle: '피드백 출력',
-      feedbackDesc: '컨트롤러 햅틱, 스피커 음량, 버퍼 크기를 조정합니다.',
-      hapticsGain: '햅틱 강도',
-      speakerVolume: '스피커 음량 (%)',
-      hapticsBuffer: '햅틱 버퍼 길이',
-      powerTitle: '전원 및 표시등',
-      powerDesc: '비활성 연결 해제와 Pico LED 동작을 제어합니다.',
-      inactiveTime: '비활성 시간 (분)',
-      disableInactive: '비활성 연결 해제 끄기',
-      disableLed: 'Pico LED 끄기',
-      performanceTitle: '성능',
-      performanceDesc: 'HID 리포트 폴링 주기를 선택합니다.',
-      pollingMode: '폴링 속도 모드',
-      realTime: '실시간',
-      compatibilityTitle: '호환성',
-      compatibilityDesc: '컨트롤러 인식 모드를 전환합니다.',
-      controllerMode: '컨트롤러 모드',
-      actions: '작업',
-      read: '읽기',
-      saveToFlash: '플래시에 저장',
-      reconnectUsb: 'USB 재연결',
-      firmwareUpdate: 'debug 펌웨어 업데이트',
-      autoFirmwareUpdate: '자동 업데이트',
-      resetDefaults: '기본값 복원',
-      state: '상태',
-      dirty: '변경 사항이 있습니다.',
-      errorUnknown: '알 수 없는 오류가 발생했습니다.',
-      status: {
-        ready: '준비됨',
-        noDevice: 'DS5 Bridge 장치를 찾지 못했습니다.',
-        connected: '연결됨',
-        applied: '장치에 적용됨',
-        saved: '플래시에 저장됨',
-        reconnectSent: 'USB 재연결 명령을 보냈습니다.',
-        defaults: '기본값을 불러왔습니다.',
-        updateReady: '공식 debug 펌웨어 업데이트 가능',
-        updated: 'debug 펌웨어 업데이트 파일을 복사했습니다.',
-        upToDate: '최신 debug 펌웨어입니다.'
-      }
-    },
-    en: {
-      langKo: 'KO',
-      langEn: 'EN',
-      langZh: '中文',
-      connected: 'Connected',
-      disconnected: 'Disconnected',
-      device: 'Device',
-      noCompatibleDevice: 'No compatible device',
-      unknown: 'Unknown',
-      firmware: 'Firmware',
-      selectDevice: 'Select device',
-      connect: 'Connect',
-      configuration: 'Configuration',
-      feedbackTitle: 'Feedback output',
-      feedbackDesc: 'Tune controller haptics, speaker level, and buffer size.',
-      hapticsGain: 'Haptics gain',
-      speakerVolume: 'Speaker volume (%)',
-      hapticsBuffer: 'Haptics buffer length',
-      powerTitle: 'Power & indicators',
-      powerDesc: 'Control inactive disconnect and Pico LED behavior.',
-      inactiveTime: 'Inactive time (minutes)',
-      disableInactive: 'Disable inactive disconnect',
-      disableLed: 'Disable Pico LED',
-      performanceTitle: 'Performance',
-      performanceDesc: 'Choose the HID report polling cadence.',
-      pollingMode: 'Polling rate mode',
-      realTime: 'Real-Time',
-      compatibilityTitle: 'Compatibility',
-      compatibilityDesc: 'Switch the controller identification mode.',
-      controllerMode: 'Controller mode',
-      actions: 'Actions',
-      read: 'Read',
-      saveToFlash: 'Save to Flash',
-      reconnectUsb: 'Reconnect USB',
-      firmwareUpdate: 'Update debug firmware',
-      autoFirmwareUpdate: 'Auto update',
-      resetDefaults: 'Reset to Defaults',
-      state: 'State',
-      dirty: 'There are unsaved changes.',
-      errorUnknown: 'An unknown error occurred.',
-      status: {
-        ready: 'Ready',
-        noDevice: 'DS5 Bridge device was not found.',
-        connected: 'Connected',
-        applied: 'Applied to device',
-        saved: 'Saved to flash',
-        reconnectSent: 'USB reconnect command was sent.',
-        defaults: 'Defaults loaded.',
-        updateReady: 'Official debug firmware update is available',
-        updated: 'Debug firmware file was copied.',
-        upToDate: 'Debug firmware is up to date.'
-      }
-    },
-    zh: {
-      langKo: '한국어',
-      langEn: 'EN',
-      langZh: '中文',
-      connected: '已连接',
-      disconnected: '未连接',
-      device: '设备',
-      noCompatibleDevice: '没有兼容设备',
-      unknown: '未知',
-      firmware: '固件',
-      selectDevice: '选择设备',
-      connect: '连接',
-      configuration: '配置',
-      feedbackTitle: '反馈输出',
-      feedbackDesc: '调整控制器触觉、扬声器音量和缓冲区大小。',
-      hapticsGain: '触觉强度',
-      speakerVolume: '扬声器音量 (%)',
-      hapticsBuffer: '触觉缓冲长度',
-      powerTitle: '电源与指示灯',
-      powerDesc: '控制空闲断开和 Pico LED 行为。',
-      inactiveTime: '空闲时间 (分钟)',
-      disableInactive: '禁用空闲断开',
-      disableLed: '关闭 Pico LED',
-      performanceTitle: '性能',
-      performanceDesc: '选择 HID 报告轮询频率。',
-      pollingMode: '轮询频率模式',
-      realTime: '实时',
-      compatibilityTitle: '兼容性',
-      compatibilityDesc: '切换控制器识别模式。',
-      controllerMode: '控制器模式',
-      actions: '操作',
-      read: '读取',
-      saveToFlash: '保存到闪存',
-      reconnectUsb: '重新连接 USB',
-      firmwareUpdate: '更新 debug 固件',
-      autoFirmwareUpdate: '自动更新',
-      resetDefaults: '恢复默认值',
-      state: '状态',
-      dirty: '有未保存的更改。',
-      errorUnknown: '发生未知错误。',
-      status: {
-        ready: '就绪',
-        noDevice: '未找到 DS5 Bridge 设备。',
-        connected: '已连接',
-        applied: '已应用到设备',
-        saved: '已保存到闪存',
-        reconnectSent: '已发送 USB 重新连接命令。',
-        defaults: '已加载默认值。',
-        updateReady: '可更新官方 debug 固件',
-        updated: '已复制 debug 固件文件。',
-        upToDate: 'debug 固件已是最新。'
-      }
-    }
-  } satisfies Record<Lang, Record<string, unknown> & { status: Record<StatusCode, string> }>;
+  const appVersion = '0.0.11';
+  const releaseChannel = 'debug';
+  const updateRepository = 'minseokk77/DS5Dongle';
 
   let lang: Lang = 'ko';
   let themeMode: ThemeMode = 'system';
@@ -210,30 +79,75 @@
   let selectedDeviceId = '';
   let config: BridgeConfig = { ...defaultConfig };
   let originalConfig: BridgeConfig | null = null;
-  let deviceInfo: DeviceInfo = {};
+  let deviceInfo: DeviceInfo = {
+    usb_vendor_name: '',
+    usb_speed_class: '',
+    rssi_strength_label: ''
+  };
   let statusCode: StatusCode = 'ready';
   let statusOverride = '';
   let toastText = '';
   let toastKind: 'info' | 'error' = 'info';
   let toastTimer: number | undefined;
+  let deviceInfoRefreshTimer: number | undefined;
+  let devicePresenceRefreshTimer: number | undefined;
+  let delayedInfoRefreshTimer: number | undefined;
   let isBusy = false;
   let errorText = '';
   let autoFirmwareUpdate = false;
+  let showInputTesterModal = false;
+  let showSettingsModal = false;
+  let diagnosticLogs: DiagnosticLog[] = [];
+  let updateStep: UpdateStepCode = 'idle';
 
   $: text = i18n[lang];
   $: effectiveTheme = themeMode === 'system' ? systemTheme : themeMode;
   $: selectedDevice = devices.find((device) => device.id === selectedDeviceId) ?? null;
-  $: isConnected = Boolean(selectedDevice);
+  $: isBridgeConnected = Boolean(selectedDeviceId && selectedDevice && statusCode !== 'noDevice');
+  $: isControllerConnected = Boolean(isBridgeConnected && deviceInfo.controller_connected);
+  $: showControllerUi = Boolean(isControllerConnected && deviceInfo.battery_level !== undefined && deviceInfo.battery_level !== null);
   $: isDirty = originalConfig ? JSON.stringify(originalConfig) !== JSON.stringify(config) : false;
   $: statusText = statusOverride || text.status[statusCode];
-  $: firmwareLabel = deviceInfo.firmware_version || text.unknown;
+  $: bridgeStatusText = isBridgeConnected ? text.picoConnected : text.picoDisconnected;
+  $: firmwareLabel = formatFirmwareVersion(deviceInfo.firmware_version);
+  $: settingsFirmwareVersion = formatFirmwareVersion(deviceInfo.firmware_version);
   $: rssiLabel =
     deviceInfo.rssi === null || deviceInfo.rssi === undefined ? text.unknown : `${deviceInfo.rssi} dBm`;
-  $: deviceTitle = selectedDevice
+  $: usbVendorLabel = deviceInfo.usb_vendor_name || '';
+  $: usbSpeedLabel = localizeUsbSpeed(deviceInfo.usb_speed_class || '');
+  $: rssiStatusLabel = localizeSignalStatus(deviceInfo.rssi_strength_label || '');
+  $: batteryLevel = deviceInfo.battery_level !== undefined && deviceInfo.battery_level !== null ? deviceInfo.battery_level : null;
+  $: isCharging = deviceInfo.is_charging !== undefined && deviceInfo.is_charging !== null ? deviceInfo.is_charging : null;
+  $: deviceTitle = showControllerUi && selectedDevice
     ? `${selectedDevice.label.split(' - ')[0]} · ${selectedDevice.vendor_id.toString(16).padStart(4, '0').toUpperCase()}:${selectedDevice.product_id.toString(16).padStart(4, '0').toUpperCase()}`
-    : text.noCompatibleDevice;
+    : text.controllerDisconnected;
+  $: firmwareCapabilities = buildFirmwareCapabilities();
+  $: updateStepText = updateStep === 'idle' ? '' : text.updateSteps[updateStep];
+  $: updateProgress = updateStepProgress(updateStep);
+  $: calibrationEnabled = Boolean(config.stick_calibration_enabled);
+  $: leftCalibrationSummary = calibrationSummary(
+    config.left_stick_center_x,
+    config.left_stick_center_y,
+    config.left_stick_deadzone
+  );
+  $: rightCalibrationSummary = calibrationSummary(
+    config.right_stick_center_x,
+    config.right_stick_center_y,
+    config.right_stick_deadzone
+  );
 
   onMount(() => {
+    // 저장된 언어와 테마 설정을 먼저 반영합니다.
+    const savedLang = localStorage.getItem('ds5:lang');
+    if (savedLang === 'ko' || savedLang === 'en' || savedLang === 'zh') {
+      lang = savedLang;
+    }
+
+    const savedTheme = localStorage.getItem('ds5:themeMode');
+    if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+      themeMode = savedTheme;
+    }
+
     const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
     const syncSystemTheme = () => {
       systemTheme = mediaQuery.matches ? 'light' : 'dark';
@@ -242,10 +156,46 @@
     syncSystemTheme();
     mediaQuery.addEventListener('change', syncSystemTheme);
     autoFirmwareUpdate = localStorage.getItem('ds5:autoFirmwareUpdate') === 'true';
+    
+    // 장치 상태를 주기적으로 갱신합니다.
     void refreshDevices();
+    deviceInfoRefreshTimer = window.setInterval(() => {
+      void refreshDeviceInfoOnly();
+    }, 2500);
+    devicePresenceRefreshTimer = window.setInterval(() => {
+      void syncDevicePresence();
+    }, 3000);
+
+    let unlisten: (() => void) | undefined;
+
+    // USB 연결 변화 이벤트를 받아 장치 목록을 다시 읽습니다.
+    const setupListener = async () => {
+      try {
+        unlisten = await listen<string[]>('device-list-changed', async () => {
+          if (isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
+            return;
+          }
+          await refreshDevices();
+        });
+      } catch (e) {
+        // 백그라운드 리스너 등록 실패는 로그만 남깁니다.
+      }
+    };
+
+    void setupListener();
 
     return () => {
       mediaQuery.removeEventListener('change', syncSystemTheme);
+      if (deviceInfoRefreshTimer !== undefined) {
+        window.clearInterval(deviceInfoRefreshTimer);
+      }
+      if (devicePresenceRefreshTimer !== undefined) {
+        window.clearInterval(devicePresenceRefreshTimer);
+      }
+      if (delayedInfoRefreshTimer !== undefined) {
+        window.clearTimeout(delayedInfoRefreshTimer);
+      }
+      if (unlisten) unlisten();
     };
   });
 
@@ -266,17 +216,124 @@
     }, 4200);
   }
 
-  function switchLanguage(nextLang: Lang) {
-    lang = nextLang;
+  function addLog(message: string, kind: DiagnosticKind = 'info') {
+    diagnosticLogs = [
+      {
+        id: Date.now(),
+        time: new Date().toLocaleTimeString(),
+        kind,
+        message
+      },
+      ...diagnosticLogs
+    ].slice(0, 40);
   }
 
-  function switchTheme(nextThemeMode: ThemeMode) {
-    themeMode = nextThemeMode;
+  function showError(message: string) {
+    addLog(message, 'error');
+    showToast(message, 'error');
+  }
+
+  // 사용자 선택값을 로컬 스토리지에 동기화합니다.
+  function handleLangChange(nextLang: Lang) {
+    lang = nextLang;
+    localStorage.setItem('ds5:lang', nextLang);
+  }
+
+  function handleThemeChange(nextTheme: ThemeMode) {
+    themeMode = nextTheme;
+    localStorage.setItem('ds5:themeMode', nextTheme);
   }
 
   function setAutoFirmwareUpdate(enabled: boolean) {
     autoFirmwareUpdate = enabled;
     localStorage.setItem('ds5:autoFirmwareUpdate', String(enabled));
+  }
+
+  function formatFirmwareVersion(rawVersion?: string | null) {
+    const normalized = normalizeFirmwareVersion(rawVersion);
+    return normalized || text.unknown;
+  }
+
+  function normalizeFirmwareVersion(rawVersion?: string | null) {
+    const raw = rawVersion?.trim();
+    if (!raw) {
+      return '';
+    }
+
+    const primary = raw.split(';')[0].trim();
+    const semanticVersion = primary.match(/^v?\d+(?:\.\d+)+(?:[-+][A-Za-z0-9._-]+)?/i);
+    return semanticVersion ? semanticVersion[0] : primary;
+  }
+
+  function isCurrentFirmware(updateVersion: string) {
+    const current = normalizeFirmwareVersion(deviceInfo.firmware_version).toLowerCase();
+    const latest = normalizeFirmwareVersion(updateVersion).toLowerCase();
+    if (!current || !latest) {
+      return false;
+    }
+
+    return current === latest || current.startsWith(`${latest}-`);
+  }
+
+  function buildFirmwareCapabilities(): FirmwareCapability[] {
+    const hasBridge = Boolean(selectedDeviceId) || devices.length > 0 || statusCode !== 'noDevice';
+    return [
+      {
+        key: 'vibration',
+        label: text.capVibration,
+        supported: hasBridge,
+        reason: text.capRequiresBridge
+      },
+      {
+        key: 'trigger',
+        label: text.capAdaptiveTrigger,
+        supported: hasBridge,
+        reason: text.capRequiresBridge
+      },
+      {
+        key: 'bootloader',
+        label: text.capBootloader,
+        supported: hasBridge,
+        reason: text.capRequiresBridge
+      },
+      {
+        key: 'calibration',
+        label: text.stickCalibration,
+        supported: hasBridge && config.config_version >= 3,
+        reason: hasBridge ? text.calibrationNoInfo : text.capRequiresBridge
+      }
+    ];
+  }
+
+  function updateStepProgress(step: UpdateStepCode) {
+    const order: UpdateStepCode[] = ['idle', 'backup', 'checking', 'bootloader', 'copying', 'waiting', 'restoring', 'done', 'latest', 'failed'];
+    const index = order.indexOf(step);
+    if (step === 'done' || step === 'latest') return 100;
+    if (step === 'failed') return 100;
+    return Math.max(0, Math.round((Math.max(index, 0) / 7) * 100));
+  }
+
+  function calibrationSummary(centerX?: number, centerY?: number, deadzone?: number) {
+    if (centerX === undefined || centerY === undefined || deadzone === undefined) return '';
+    return `X ${centerX.toFixed(3)} / Y ${centerY.toFixed(3)} · ${deadzone.toFixed(1)}%`;
+  }
+
+  function localizeUsbSpeed(raw: string) {
+    if (!raw) return '';
+    if (raw.includes('Full-Speed')) return text.usbFullSpeedStable;
+    if (raw.includes('High-Speed')) return text.usbHighSpeed;
+    return raw;
+  }
+
+  function localizeSignalStatus(raw: string) {
+    if (!raw) return text.signalUnknown;
+    if (raw.includes('우수') || raw.toLowerCase().includes('excellent')) return text.signalExcellent;
+    if (raw.includes('보통') || raw.toLowerCase().includes('normal')) return text.signalNormal;
+    return raw;
+  }
+
+  function sleep(ms: number) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
   async function runTask(task: () => Promise<void>) {
@@ -286,7 +343,7 @@
       await task();
     } catch (error) {
       errorText = error instanceof Error ? error.message : text.errorUnknown;
-      showToast(errorText, 'error');
+      showError(errorText);
     } finally {
       isBusy = false;
     }
@@ -309,45 +366,102 @@
 
       await readAll();
       if (autoFirmwareUpdate) {
-        await performFirmwareUpdate(true);
+        await performFirmwareUpdate({ automatic: true });
       } else {
         setStatus('connected');
       }
     });
   }
 
-  async function refreshInfoOnly() {
-    if (!selectedDeviceId) return;
-    deviceInfo = await readDeviceInfo(selectedDeviceId);
+  async function onDeviceChanged() {
+    await runTask(readAll);
+  }
+
+  async function refreshDeviceInfoOnly() {
+    if (!selectedDeviceId || isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
+      return;
+    }
+
+    const deviceId = selectedDeviceId;
+    try {
+      const nextInfo = await readDeviceInfo(deviceId);
+      if (selectedDeviceId === deviceId) {
+        deviceInfo = nextInfo;
+      }
+    } catch (error) {
+      addLog(`${text.logDeviceInfoFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
+      await syncDevicePresence();
+    }
+  }
+
+  async function syncDevicePresence() {
+    if (isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
+      return;
+    }
+
+    try {
+      const latestDevices = await listDevices();
+      devices = latestDevices;
+      if (!latestDevices.length || !latestDevices.some((device) => device.id === selectedDeviceId)) {
+        selectedDeviceId = '';
+        originalConfig = null;
+        deviceInfo = {
+          usb_vendor_name: '',
+          usb_speed_class: '',
+          rssi_strength_label: ''
+        };
+        setStatus('noDevice');
+      }
+    } catch {
+      addLog(text.logDevicePresenceFailed, 'error');
+      selectedDeviceId = '';
+      devices = [];
+      originalConfig = null;
+      deviceInfo = {
+        usb_vendor_name: '',
+        usb_speed_class: '',
+        rssi_strength_label: ''
+      };
+      setStatus('noDevice');
+    }
+  }
+
+  function scheduleDeviceInfoRefresh() {
+    if (delayedInfoRefreshTimer !== undefined) {
+      window.clearTimeout(delayedInfoRefreshTimer);
+    }
+    delayedInfoRefreshTimer = window.setTimeout(() => {
+      delayedInfoRefreshTimer = undefined;
+      void refreshDeviceInfoOnly();
+    }, 1200);
   }
 
   async function readAll() {
     if (!selectedDeviceId) return;
+    setStatus('reading');
 
-    const infoPromise = readDeviceInfo(selectedDeviceId).then((info) => {
-      deviceInfo = info;
-    });
+    const [infoResult, configResult] = await Promise.allSettled([
+      readDeviceInfo(selectedDeviceId),
+      readConfig(selectedDeviceId)
+    ]);
 
-    const configPromise = readConfig(selectedDeviceId).then((nextConfig) => {
-      config = nextConfig;
-      originalConfig = structuredClone(nextConfig);
-    });
-
-    await Promise.allSettled([infoPromise, configPromise]);
+    if (infoResult.status === 'fulfilled') {
+      deviceInfo = infoResult.value;
+    } else {
+      addLog(`${text.logDeviceInfoFailed}: ${infoResult.reason}`, 'error');
+    }
+    if (configResult.status === 'fulfilled') {
+      config = configResult.value;
+      originalConfig = structuredClone(configResult.value);
+    } else {
+      throw configResult.reason;
+    }
     setStatus('connected');
+    scheduleDeviceInfoRefresh();
   }
 
   async function onRead() {
     await runTask(readAll);
-  }
-
-  async function onApply() {
-    if (!selectedDeviceId) return;
-    await runTask(async () => {
-      await applyConfig(selectedDeviceId, config);
-      originalConfig = structuredClone(config);
-      setStatus('applied');
-    });
   }
 
   async function onSave() {
@@ -370,136 +484,319 @@
   }
 
   async function onFirmwareUpdate() {
-    await runTask(() => performFirmwareUpdate(false));
+    await runTask(() => performFirmwareUpdate({ automatic: false }));
   }
 
-  async function performFirmwareUpdate(skipIfCurrent: boolean) {
+  async function onRecoveryFirmwareUpdate() {
+    await runTask(async () => {
+      updateStep = 'copying';
+      setStatus('updating');
+      const result = await recoveryFlashLatestDebugFirmware();
+      updateStep = 'done';
+      addLog(`${text.recoveryFirmwareUpdate}: ${result.version} / ${result.asset_name}`);
+      showToast(`${text.status.updated}: ${result.version}`);
+      await syncDevicePresence();
+    });
+  }
+
+  async function onCalibrationApply(
+    side: 'left' | 'right',
+    result: { centerX: number; centerY: number; deadzone: number }
+  ) {
+    config = {
+      ...config,
+      config_version: 3,
+      stick_calibration_enabled: true,
+      ...(side === 'left'
+        ? {
+            left_stick_center_x: result.centerX,
+            left_stick_center_y: result.centerY,
+            left_stick_deadzone: result.deadzone
+          }
+        : {
+            right_stick_center_x: result.centerX,
+            right_stick_center_y: result.centerY,
+            right_stick_deadzone: result.deadzone
+          })
+    };
+
+    if (selectedDeviceId) {
+      await applyConfig(selectedDeviceId, config);
+      await saveConfig(selectedDeviceId);
+      originalConfig = structuredClone(config);
+      addLog(text.calibrationDone);
+    }
+  }
+
+  async function waitForBridgeReconnect(preferredDeviceId: string, timeoutMs = 35000) {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      await sleep(750);
+
+      try {
+        const latestDevices = await listDevices();
+        devices = latestDevices;
+
+        const preferredDevice = latestDevices.find((device) => device.id === preferredDeviceId);
+        const nextDevice = preferredDevice ?? latestDevices[0];
+        if (nextDevice) {
+          selectedDeviceId = nextDevice.id;
+          return nextDevice.id;
+        }
+      } catch {
+        // 부트로더로 전환되는 짧은 구간에서는 HID 조회가 실패할 수 있습니다.
+      }
+    }
+
+    return '';
+  }
+
+  async function restoreConfigAfterFirmwareUpdate(preservedConfig: BridgeConfig | null, previousDeviceId: string) {
+    if (!preservedConfig || !previousDeviceId) {
+      return false;
+    }
+
+    updateStep = 'waiting';
+    statusOverride = text.settingsRestoreWaiting;
+    const restoredDeviceId = await waitForBridgeReconnect(previousDeviceId);
+    if (!restoredDeviceId) {
+      statusOverride = '';
+      updateStep = 'failed';
+      showError(text.settingsRestoreReconnectFailed);
+      return false;
+    }
+
+    updateStep = 'restoring';
+    statusOverride = text.settingsRestoring;
+    const deadline = Date.now() + 12000;
+    while (Date.now() < deadline) {
+      try {
+        await applyConfig(restoredDeviceId, preservedConfig);
+        await saveConfig(restoredDeviceId);
+        config = structuredClone(preservedConfig);
+        originalConfig = structuredClone(preservedConfig);
+        await readAll();
+        statusOverride = '';
+        addLog(text.settingsRestored);
+        return true;
+      } catch (error) {
+        addLog(`${text.settingsRestoreFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
+        await sleep(800);
+      }
+    }
+
+    statusOverride = '';
+    updateStep = 'failed';
+    showError(text.settingsRestoreFailed);
+    return false;
+  }
+
+  async function performFirmwareUpdate(options: { automatic: boolean }) {
+    const previousStatus = statusCode;
+    const previousOverride = statusOverride;
+    const previousDeviceId = selectedDeviceId;
+    const preservedConfig = selectedDeviceId ? structuredClone(config) : null;
+    updateStep = preservedConfig ? 'backup' : 'checking';
+    if (!options.automatic) {
+      setStatus('updateChecking');
+    }
+
+    if (preservedConfig) {
+      addLog(text.updateBackupComplete);
+    }
+
+    updateStep = 'checking';
     const update = await checkDebugFirmwareUpdate();
-    if (skipIfCurrent && deviceInfo.firmware_version === update.version) {
+    if (isCurrentFirmware(update.version)) {
+      updateStep = 'latest';
+      if (options.automatic) {
+        statusCode = previousStatus;
+        statusOverride = previousOverride;
+        updateStep = 'idle';
+        return;
+      }
+
       setStatus('upToDate');
+      showToast(`${text.status.upToDate}: ${update.version}`);
+      addLog(`${text.status.upToDate}: ${update.version}`);
       return;
     }
 
-    showToast(`${text.status.updateReady}: ${update.version} / ${update.asset_name}`);
+    if (!options.automatic) {
+      showToast(`${text.status.updateReady}: ${update.version} / ${update.asset_name}`);
+      setStatus('updating');
+    }
+
+    updateStep = selectedDeviceId ? 'bootloader' : 'copying';
+    statusOverride = text.updateSteps[updateStep];
     const result = await flashLatestDebugFirmware(selectedDeviceId || undefined);
+    updateStep = 'copying';
+    addLog(`${text.status.updated}: ${result.version} / ${result.asset_name}`);
+    const shouldRestoreSettings = Boolean(preservedConfig && previousDeviceId);
+    const settingsRestored = await restoreConfigAfterFirmwareUpdate(preservedConfig, previousDeviceId);
+    if (shouldRestoreSettings && !settingsRestored) {
+      if (options.automatic) {
+        statusCode = previousStatus;
+        statusOverride = previousOverride;
+        return;
+      }
+
+      setStatus('updated');
+      return;
+    }
+
+    updateStep = 'done';
+    if (options.automatic) {
+      statusCode = previousStatus;
+      statusOverride = previousOverride;
+      showToast(
+        settingsRestored
+          ? `${text.status.updated}: ${result.version} / ${text.settingsRestored}`
+          : `${text.status.updated}: ${result.version} / ${result.asset_name}`
+      );
+      return;
+    }
+
     setStatus('updated');
-    showToast(`${text.status.updated}: ${result.version} / ${result.asset_name}`);
+    showToast(
+      settingsRestored
+        ? `${text.status.updated}: ${result.version} / ${text.settingsRestored}`
+        : `${text.status.updated}: ${result.version} / ${result.asset_name}`
+    );
   }
 
   function resetToDefaults() {
     config = { ...defaultConfig };
     setStatus('defaults');
+    addLog(text.resetDefaults);
   }
 </script>
 
-<main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell">
+<main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell" class:modal-open={showInputTesterModal || showSettingsModal}>
   <header class="topbar">
     <div class="brand">
       <div class="brand-icon">
-        <span class="wifi"><Icon name="wifi" size={13} /></span>
-        <span class="pad"><Icon name="gamepad" size={30} /></span>
+        <img src={appIcon} alt="" />
       </div>
-      <h1>DS5 Bridge Config</h1>
+      <h1>DS5 Dongle Config</h1>
     </div>
-    <div class="toolbar">
-      <span class="translate"><Icon name="languages" size={16} /></span>
-      <div class="seg small" aria-label="언어 선택">
-        <button class:active={lang === 'ko'} type="button" on:click={() => switchLanguage('ko')}>{text.langKo}</button>
-        <button class:active={lang === 'en'} type="button" on:click={() => switchLanguage('en')}>{text.langEn}</button>
-        <button class:active={lang === 'zh'} type="button" on:click={() => switchLanguage('zh')}>{text.langZh}</button>
+    
+    <div class="toolbar compact-toolbar">
+      <div class:connected={showControllerUi} class="status-pill">
+        <span><Icon name="check" size={10} /></span>
+        {showControllerUi ? text.controllerConnected : text.controllerDisconnected}
       </div>
-      <div class="seg icon-group" aria-label="테마 선택">
-        <button class:active={themeMode === 'light'} type="button" on:click={() => switchTheme('light')} title="라이트 테마"><Icon name="sun" size={15} /></button>
-        <button class:active={themeMode === 'dark'} type="button" on:click={() => switchTheme('dark')} title="다크 테마"><Icon name="moon" size={15} /></button>
-        <button class:active={themeMode === 'system'} type="button" on:click={() => switchTheme('system')} title="시스템 테마"><Icon name="monitor" size={15} /></button>
-      </div>
-      <div class:connected={isConnected} class="status-pill"><span><Icon name="check" size={10} /></span>{isConnected ? text.connected : text.disconnected}</div>
+      <button class="settings-btn" type="button" onclick={() => (showSettingsModal = true)} aria-label={text.settings} title={text.settings}>
+        <Icon name="settings" size={17} />
+      </button>
     </div>
   </header>
 
   {#if toastText}
     <div class:error={toastKind === 'error'} class="toast" role="status">
       <span>{toastText}</span>
-      <button type="button" on:click={() => (toastText = '')}>×</button>
+      <button type="button" onclick={() => (toastText = '')}>×</button>
     </div>
   {/if}
 
-  <section class="device-card">
-    <div class="device-left">
-      <div class="square-icon"><Icon name="cable" size={18} /></div>
-      <div>
-        <div class="overline">{text.device}</div>
-        <div class="device-name">{deviceTitle}</div>
-        <div class="device-meta"><span>{text.firmware} {firmwareLabel}</span><span>RSSI {rssiLabel}</span></div>
-      </div>
-    </div>
-    <div class="device-right">
-      {#if devices.length > 1}
-        <select bind:value={selectedDeviceId} disabled={isBusy} aria-label={text.selectDevice}>
-          {#each devices as device}
-            <option value={device.id}>{device.label}</option>
-          {/each}
-        </select>
-      {/if}
-      <button class="light-btn" type="button" on:click={() => refreshDevices()} disabled={isBusy}><Icon name="cable" size={15} /> {text.connect}</button>
-    </div>
-  </section>
+  <!-- 장치 상태와 연결 카드 -->
+  <DeviceCard
+    {devices}
+    bind:selectedDeviceId
+    {isBusy}
+    isControllerConnected={showControllerUi}
+    {deviceTitle}
+    {firmwareLabel}
+    {rssiLabel}
+    rssi={deviceInfo.rssi}
+    {usbVendorLabel}
+    {usbSpeedLabel}
+    {rssiStatusLabel}
+    {batteryLevel}
+    {isCharging}
+    {text}
+    onRefreshDevices={refreshDevices}
+    onDeviceChanged={onDeviceChanged}
+    onOpenInputTester={() => (showInputTesterModal = true)}
+  />
 
   <div class="main-grid">
-    <section class="config-panel panel-dark">
-      <div class="section-title"><span><Icon name="sliders" size={18} /></span><h2>{text.configuration}</h2></div>
-      <div class="cards-grid">
-        <section class="config-card">
-          <div class="card-head"><span><Icon name="volume" size={17} /></span><div><h3>{text.feedbackTitle}</h3><p>{text.feedbackDesc}</p></div></div>
-          <label class="control-row"><strong>{text.hapticsGain}</strong><input type="range" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} /><input type="number" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} /></label>
-          <label class="control-row"><strong>{text.speakerVolume}</strong><input type="range" min="0" max="100" step="1" bind:value={config.speaker_volume_percent} /><input type="number" min="0" max="100" step="1" bind:value={config.speaker_volume_percent} /></label>
-          <label class="control-row"><strong>{text.hapticsBuffer}</strong><input type="range" min="16" max="128" step="1" bind:value={config.haptics_buffer_length} /><input type="number" min="16" max="128" step="1" bind:value={config.haptics_buffer_length} /></label>
-        </section>
+    <!-- 설정 보드 -->
+    <ConfigPanel
+      bind:config
+      {text}
+      {showToast}
+      onLog={addLog}
+    />
 
-        <section class="config-card">
-          <div class="card-head"><span><Icon name="zap" size={17} /></span><div><h3>{text.powerTitle}</h3><p>{text.powerDesc}</p></div></div>
-          <label class="control-row"><strong>{text.inactiveTime}</strong><input type="range" min="5" max="60" step="1" bind:value={config.inactive_time} /><input type="number" min="5" max="60" step="1" bind:value={config.inactive_time} /></label>
-          <label class="switch-row"><strong>{text.disableInactive}</strong><input type="checkbox" bind:checked={config.disable_inactive_disconnect} /></label>
-          <label class="switch-row"><strong>{text.disableLed}</strong><input type="checkbox" bind:checked={config.disable_pico_led} /></label>
-        </section>
-
-        <section class="config-card compact">
-          <div class="card-head"><span><Icon name="gauge" size={17} /></span><div><h3>{text.performanceTitle}</h3><p>{text.performanceDesc}</p></div></div>
-          <strong class="field-label">{text.pollingMode}</strong>
-          <div class="seg wide">
-            <button class:active={config.polling_rate_mode === 0} type="button" on:click={() => (config.polling_rate_mode = 0)}>250 Hz</button>
-            <button class:active={config.polling_rate_mode === 1} type="button" on:click={() => (config.polling_rate_mode = 1)}>500 Hz</button>
-            <button class:active={config.polling_rate_mode === 2} type="button" on:click={() => (config.polling_rate_mode = 2)}>{text.realTime}</button>
-          </div>
-        </section>
-
-        <section class="config-card compact">
-          <div class="card-head"><span><Icon name="gamepad" size={17} /></span><div><h3>{text.compatibilityTitle}</h3><p>{text.compatibilityDesc}</p></div></div>
-          <strong class="field-label">{text.controllerMode}</strong>
-          <div class="seg wide">
-            <button class:active={config.controller_mode === 0} type="button" on:click={() => (config.controller_mode = 0)}>DS5</button>
-            <button class:active={config.controller_mode === 1} type="button" on:click={() => (config.controller_mode = 1)}>DSE</button>
-            <button class:active={config.controller_mode === 2} type="button" on:click={() => (config.controller_mode = 2)}>Auto</button>
-          </div>
-        </section>
-      </div>
-    </section>
-
-    <aside class="actions-panel panel-dark">
-      <div class="section-title"><span><Icon name="download" size={18} /></span><h2>{text.actions}</h2></div>
-      <div class="action-stack">
-        <button type="button" on:click={onRead} disabled={!isConnected || isBusy}><Icon name="rotate-cw" size={15} /> {text.read}</button>
-        <button class="primary" type="button" on:click={onSave} disabled={!isConnected || isBusy}><Icon name="save" size={15} /> {text.saveToFlash}</button>
-        <button type="button" on:click={onReconnect} disabled={!isConnected || isBusy}><Icon name="power" size={15} /> {text.reconnectUsb}</button>
-        <button type="button" on:click={onFirmwareUpdate} disabled={isBusy}><Icon name="download" size={15} /> {text.firmwareUpdate}</button>
-        <button class="ghost" type="button" on:click={resetToDefaults} disabled={isBusy}><Icon name="rotate-ccw" size={15} /> {text.resetDefaults}</button>
-        <label class="auto-update-row">
-          <span>{text.autoFirmwareUpdate}</span>
-          <input type="checkbox" checked={autoFirmwareUpdate} on:change={(event) => setAutoFirmwareUpdate(event.currentTarget.checked)} />
-        </label>
-      </div>
-      <div class="state-card"><div class="overline">{text.state}</div><strong>{statusText}</strong>{#if isDirty}<p>{text.dirty}</p>{/if}</div>
-    </aside>
+    <!-- 작업 패널 -->
+      <ActionPanel
+      isConnected={isBridgeConnected}
+      {isBusy}
+      {isDirty}
+      statusText={bridgeStatusText}
+      {updateStepText}
+      {text}
+      onRead={onRead}
+      onSave={onSave}
+      onReconnect={onReconnect}
+      onFirmwareUpdate={onFirmwareUpdate}
+    />
   </div>
-</main>
 
+  <!-- 실시간 입력 테스트 보드 -->
+  <InputTester
+    {text}
+    deviceId={selectedDeviceId}
+    capabilities={firmwareCapabilities}
+    onLog={addLog}
+    onCalibrationApply={onCalibrationApply}
+    bind:isOpen={showInputTesterModal}
+  />
+  <SettingsModal
+    isOpen={showSettingsModal}
+    {lang}
+    {themeMode}
+    isConnected={showControllerUi}
+    {autoFirmwareUpdate}
+    {appVersion}
+    firmwareVersion={settingsFirmwareVersion}
+    {releaseChannel}
+    {updateRepository}
+    configVersion={`v${config.config_version}`}
+    {calibrationEnabled}
+    {leftCalibrationSummary}
+    {rightCalibrationSummary}
+    capabilities={firmwareCapabilities}
+    logs={diagnosticLogs}
+    {text}
+    onClose={() => (showSettingsModal = false)}
+    onLangChange={handleLangChange}
+    onThemeChange={handleThemeChange}
+    onAutoFirmwareUpdateChange={setAutoFirmwareUpdate}
+    onResetDefaults={resetToDefaults}
+    onRecoveryFirmwareUpdate={onRecoveryFirmwareUpdate}
+  />
+
+  {#if updateStep !== 'idle'}
+    <div class="update-progress-overlay" role="presentation">
+      <div class="update-progress-modal" role="status" aria-label={text.firmwareUpdateProgress}>
+        <h2>{text.firmwareUpdateProgress}</h2>
+        <p>{updateStepText}</p>
+        <div class="progress-track"><span style={`width: ${updateProgress}%`}></span></div>
+        <strong>{updateProgress}%</strong>
+      </div>
+    </div>
+  {/if}
+
+  {#if showInputTesterModal || showSettingsModal}
+    <!-- 모달이 열린 동안 배경 클릭을 차단합니다. -->
+    <div 
+      class="global-click-blocker" 
+      onclick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onkeydown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      role="none"
+    ></div>
+  {/if}
+</main>

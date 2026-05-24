@@ -23,11 +23,15 @@ pub struct ReportSettings {
     pub command: u8,
     pub firmware_version: u8,
     pub rssi: u8,
+    pub battery: u8,
+    #[allow(dead_code)]
+    pub capabilities: u8,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ConfigSettings {
     pub version: u8,
+    #[allow(dead_code)]
     pub body_length: usize,
     pub haptics_gain_min: f32,
     pub haptics_gain_max: f32,

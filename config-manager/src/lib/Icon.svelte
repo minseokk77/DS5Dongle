@@ -2,6 +2,7 @@
   export let name:
     | 'check'
     | 'cable'
+    | 'battery'
     | 'download'
     | 'gamepad'
     | 'gauge'
@@ -12,10 +13,13 @@
     | 'rotate-ccw'
     | 'rotate-cw'
     | 'save'
+    | 'settings'
     | 'sliders'
     | 'sun'
+    | 'upload'
     | 'volume'
     | 'wifi'
+    | 'x'
     | 'zap';
   export let size = 18;
 </script>
@@ -32,7 +36,10 @@
   viewBox="0 0 24 24"
   width={size}
 >
-  {#if name === 'check'}
+  {#if name === 'battery'}
+    <rect x="2" y="7" width="18" height="10" rx="2" />
+    <path d="M22 11v2" />
+  {:else if name === 'check'}
     <path d="M20 6 9 17l-5-5" />
   {:else if name === 'cable'}
     <path d="M17 7 7 17" />
@@ -79,6 +86,9 @@
     <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
     <path d="M17 21v-8H7v8" />
     <path d="M7 3v5h8" />
+  {:else if name === 'settings'}
+    <path d="M12.2 2h-.4a2 2 0 0 0-2 1.8l-.1.8a2 2 0 0 1-2.8 1.4l-.7-.3a2 2 0 0 0-2.5.9l-.2.3a2 2 0 0 0 .4 2.6l.6.5a2 2 0 0 1 0 3.1l-.6.5a2 2 0 0 0-.4 2.6l.2.3a2 2 0 0 0 2.5.9l.7-.3a2 2 0 0 1 2.8 1.4l.1.8a2 2 0 0 0 2 1.8h.4a2 2 0 0 0 2-1.8l.1-.8a2 2 0 0 1 2.8-1.4l.7.3a2 2 0 0 0 2.5-.9l.2-.3a2 2 0 0 0-.4-2.6l-.6-.5a2 2 0 0 1 0-3.1l.6-.5a2 2 0 0 0 .4-2.6l-.2-.3a2 2 0 0 0-2.5-.9l-.7.3a2 2 0 0 1-2.8-1.4l-.1-.8a2 2 0 0 0-2-1.8Z" />
+    <circle cx="12" cy="12" r="3" />
   {:else if name === 'sliders'}
     <line x1="4" x2="21" y1="4" y2="4" />
     <line x1="4" x2="21" y1="12" y2="12" />
@@ -105,5 +115,12 @@
     <path d="M12 20h.01" />
   {:else if name === 'zap'}
     <path d="M13 2 3 14h8l-1 8 11-14h-8l1-6Z" />
+  {:else if name === 'upload'}
+    <path d="M12 21V9" />
+    <path d="m7 14 5-5 5 5" />
+    <path d="M5 3h14" />
+  {:else if name === 'x'}
+    <path d="M18 6 6 18" />
+    <path d="m6 6 12 12" />
   {/if}
 </svg>

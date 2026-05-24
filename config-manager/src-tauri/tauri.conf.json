@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "DS5 Bridge Config",
-  "version": "0.1.0",
+  "productName": "DS5 Dongle Config",
+  "version": "0.0.11",
   "identifier": "local.ds5.bridge.config",
   "build": {
     "beforeBuildCommand": "pnpm build",
@@ -10,7 +10,7 @@
   "app": {
     "windows": [
       {
-        "title": "DS5 Bridge Config",
+        "title": "DS5 Dongle Config",
         "width": 980,
         "height": 635,
         "minWidth": 780,
@@ -27,6 +27,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "resources": [
       "config/device.toml"
     ]
