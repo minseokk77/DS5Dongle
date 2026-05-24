@@ -80,6 +80,7 @@
   const appVersion = '0.0.1.6';
   const releaseChannel = 'debug';
   const updateRepository = 'minseokk77/DS5Dongle';
+  const updateStepOrder: UpdateStepCode[] = ['backup', 'checking', 'bootloader', 'copying', 'waiting', 'restoring', 'done'];
 
   const emptyDeviceInfo = (): DeviceInfo => ({
     usb_vendor_name: '',
@@ -142,7 +143,6 @@
   $: firmwareCapabilities = buildFirmwareCapabilities();
   $: updateStepText = updateStep === 'idle' ? '' : text.updateSteps[updateStep];
   $: updateProgress = updateStepProgress(updateStep);
-  $: updateStepItems = buildUpdateStepItems();
   $: calibrationEnabled = Boolean(config.stick_calibration_enabled);
   $: leftCalibrationSummary = calibrationSummary(
     config.left_stick_center_x,
@@ -332,28 +332,22 @@
     return Math.max(0, Math.round((Math.max(index, 0) / 7) * 100));
   }
 
-  function buildUpdateStepItems() {
-    const order: UpdateStepCode[] = ['backup', 'checking', 'bootloader', 'copying', 'waiting', 'restoring', 'done'];
-    const activeIndex = order.indexOf(updateStep);
+  function getUpdateStepState(step: UpdateStepCode) {
+    if (updateStep === 'failed' || updateStep === 'latest' || updateStep === 'idle') {
+      return 'waiting';
+    }
 
-    return order.map((step, index) => ({
-      step,
-      label: text.updateSteps[step],
-      marker:
-        updateStep === 'failed' || updateStep === 'latest'
-          ? ''
-          : index < activeIndex || updateStep === 'done'
-            ? '✓'
-            : '',
-      state:
-        updateStep === 'failed' || updateStep === 'latest'
-          ? 'waiting'
-          : index < activeIndex || updateStep === 'done'
-            ? 'done'
-            : index === activeIndex
-              ? 'active'
-              : 'waiting'
-    }));
+    const activeIndex = updateStepOrder.indexOf(updateStep);
+    const stepIndex = updateStepOrder.indexOf(step);
+    if (updateStep === 'done' || stepIndex < activeIndex) return 'done';
+    if (stepIndex === activeIndex) return 'active';
+    return 'waiting';
+  }
+
+  function getUpdateStepMarker(step: UpdateStepCode) {
+    const state = getUpdateStepState(step);
+    if (state === 'done') return '✓';
+    return '';
   }
 
   function finishUpdateProgressModal() {
@@ -1059,10 +1053,10 @@
           {settingsFirmwareVersion} / ds5-bridge-debug-{settingsFirmwareVersion}.uf2
         </div>
         <div class="update-step-grid">
-          {#each updateStepItems as item}
-            <div class:done={item.state === 'done'} class:active={item.state === 'active'} class="update-step-card">
-              <span>{item.marker}</span>
-              <strong>{item.label}</strong>
+          {#each updateStepOrder as step}
+            <div class:done={getUpdateStepState(step) === 'done'} class:active={getUpdateStepState(step) === 'active'} class="update-step-card">
+              <span>{getUpdateStepMarker(step)}</span>
+              <strong>{text.updateSteps[step]}</strong>
             </div>
           {/each}
         </div>

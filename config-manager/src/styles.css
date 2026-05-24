@@ -523,11 +523,17 @@ input[type="checkbox"]:checked::after { transform: translateX(14px); }
 }
 
 .update-step-card span {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--modal-muted) 38%, transparent);
   flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  color: transparent;
+  font-size: 0.58rem;
+  font-weight: 900;
+  line-height: 1;
 }
 
 .update-step-card strong {
@@ -538,11 +544,6 @@ input[type="checkbox"]:checked::after { transform: translateX(14px); }
   background: #63e2b7;
   box-shadow: 0 0 14px rgba(99, 226, 183, 0.42);
   color: #07140f;
-  display: grid;
-  place-items: center;
-  font-size: 0.58rem;
-  font-weight: 900;
-  line-height: 1;
 }
 
 .update-step-card.done {
@@ -558,6 +559,7 @@ input[type="checkbox"]:checked::after { transform: translateX(14px); }
 .update-step-card.active span {
   background: #2f6bff;
   box-shadow: 0 0 14px rgba(47, 107, 255, 0.42);
+  color: transparent;
 }
 
 .update-progress-actions {
