@@ -67,9 +67,21 @@ try {
   }
 
   $releaseExists = $true
-  gh release view $Tag --repo $Repository *> $null
-  if ($LASTEXITCODE -ne 0) {
-    $releaseExists = $false
+  $previousNativeErrorPreference = $null
+  if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -ErrorAction SilentlyContinue) {
+    $previousNativeErrorPreference = $Global:PSNativeCommandUseErrorActionPreference
+    $Global:PSNativeCommandUseErrorActionPreference = $false
+  }
+  try {
+    gh release view $Tag --repo $Repository *> $null
+    if ($LASTEXITCODE -ne 0) {
+      $releaseExists = $false
+    }
+  }
+  finally {
+    if ($null -ne $previousNativeErrorPreference) {
+      $Global:PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
+    }
   }
 
   if (-not $releaseExists) {
