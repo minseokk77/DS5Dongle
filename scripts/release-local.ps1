@@ -52,9 +52,10 @@ try {
   }
 
   $bundleRoot = Join-Path $configManager "src-tauri\target\release\bundle"
+  $assetVersion = $Tag.TrimStart("v")
   $assets = @()
   $assets += Get-ChildItem -LiteralPath $bundleRoot -Recurse -File |
-    Where-Object { $_.Extension -in ".exe", ".msi" } |
+    Where-Object { $_.Extension -in ".exe", ".msi" -and $_.Name -like "*$assetVersion*" } |
     Select-Object -ExpandProperty FullName
 
   if ($FirmwareUf2Path) {
