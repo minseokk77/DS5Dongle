@@ -21,6 +21,7 @@ Require-Command git
 Require-Command gh
 Require-Command pnpm.cmd
 Require-Command cargo
+Require-Command powershell
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $configManager = Join-Path $repoRoot "config-manager"
@@ -217,7 +218,7 @@ try {
   $bundleAssets = Get-ChildItem -LiteralPath $bundleRoot -Recurse -File |
     Where-Object {
       $assetName = $_.Name
-      $_.Extension -in ".exe", ".msi" -and
+      $_.Extension -eq ".exe" -and
       [bool]($assetVersionCandidates | Where-Object { $assetName -like "*$_*" } | Select-Object -First 1)
     }
 
@@ -232,12 +233,20 @@ try {
     $assets += $stagedPath
   }
 
-  if ($FirmwareUf2Path) {
-    $resolvedUf2 = (Resolve-Path -LiteralPath $FirmwareUf2Path).Path
-    $stagedUf2 = Join-Path $assetStage "ds5-bridge-debug-$Tag.uf2"
-    Copy-Item -LiteralPath $resolvedUf2 -Destination $stagedUf2 -Force
-    $assets += $stagedUf2
+  if (-not $FirmwareUf2Path) {
+    if ($NoBuild) {
+      throw "NoBuild 옵션에서는 FirmwareUf2Path를 직접 지정해야 합니다."
+    }
+
+    $firmwareBuildScript = Join-Path $repoRoot "tools\build-windows.ps1"
+    & powershell -ExecutionPolicy Bypass -File $firmwareBuildScript -Variant debug -FirmwareVersion $Tag
+    $FirmwareUf2Path = Join-Path $repoRoot "tools\ds5-bridge-debug.uf2"
   }
+
+  $resolvedUf2 = (Resolve-Path -LiteralPath $FirmwareUf2Path).Path
+  $stagedUf2 = Join-Path $assetStage "ds5-bridge-debug-$Tag.uf2"
+  Copy-Item -LiteralPath $resolvedUf2 -Destination $stagedUf2 -Force
+  $assets += $stagedUf2
 
   if ($assets.Count -eq 0) {
     throw "업로드할 릴리즈 에셋을 찾지 못했습니다."
