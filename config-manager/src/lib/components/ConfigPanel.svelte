@@ -444,11 +444,13 @@
     gap: 8px;
     flex: 1 1 auto;
     min-width: 0;
+    margin-left: 18px;
   }
 
   .preset-controls {
+    position: relative;
     display: grid;
-    grid-template-columns: minmax(160px, 260px) 48px 132px 96px 96px;
+    grid-template-columns: minmax(150px, 238px) 112px 88px 88px;
     align-items: center;
     justify-content: flex-end;
     gap: 6px;
@@ -476,14 +478,16 @@
   }
 
   .preset-state {
-    flex: 0 0 auto;
-    max-width: 64px;
+    position: absolute;
+    left: 0;
+    top: -16px;
+    max-width: 238px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--muted);
-    font-size: 0.76rem;
-    grid-column: 2;
+    font-size: 0.68rem;
+    line-height: 1;
   }
 
   .preset-state.modified {
@@ -494,7 +498,7 @@
     background: rgba(99, 226, 183, 0.1);
     border: 1px solid rgba(99, 226, 183, 0.25);
     color: #63e2b7;
-    padding: 6px 12px;
+    padding: 6px 8px;
     border-radius: 6px;
     font-size: 0.8rem;
     font-weight: 500;
@@ -508,7 +512,7 @@
     white-space: nowrap;
     flex: 0 0 auto;
     min-width: 0;
-    grid-column: 3;
+    grid-column: 2;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -536,11 +540,11 @@
   }
 
   .preset-tool-btn:nth-of-type(2) {
-    grid-column: 4;
+    grid-column: 3;
   }
 
   .preset-tool-btn:nth-of-type(3) {
-    grid-column: 5;
+    grid-column: 4;
   }
 
   .preset-tool-btn:hover {
