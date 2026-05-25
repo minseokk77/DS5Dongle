@@ -152,6 +152,37 @@ h1 { margin: 0; font-size: clamp(1.35rem, 3vw, 1.92rem); font-weight: 450; lette
   filter: brightness(1.08);
   border-color: color-mix(in srgb, var(--border) 60%, var(--text) 25%);
 }
+.window-controls {
+  height: 34px;
+  display: grid;
+  grid-template-columns: repeat(3, 34px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--control-2);
+  color: var(--text);
+  box-shadow: var(--card-shadow);
+}
+
+.window-controls button {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: currentColor;
+  border-radius: 0;
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.window-controls button:hover {
+  background: color-mix(in srgb, var(--control-2) 70%, var(--text) 16%);
+}
+
+.window-controls button.close:hover {
+  background: #e81123;
+  color: #ffffff;
+}
 .translate { display: grid; place-items: center; color: var(--subtle); }
 .seg {
   display: inline-grid;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import appIcon from './assets/app-icon.svg';
   import Icon from './lib/Icon.svelte';
   import { i18n, type Lang, type StatusCode } from './lib/i18n';
@@ -927,15 +928,27 @@
     setStatus('defaults');
     addLog(text.resetDefaults);
   }
+
+  async function minimizeWindow() {
+    await getCurrentWindow().minimize();
+  }
+
+  async function toggleMaximizeWindow() {
+    await getCurrentWindow().toggleMaximize();
+  }
+
+  async function closeWindow() {
+    await getCurrentWindow().close();
+  }
 </script>
 
 <main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell" class:modal-open={showInputTesterModal || showSettingsModal || showUpdateProgressModal}>
-  <header class="topbar">
-    <div class="brand">
+  <header class="topbar" data-tauri-drag-region>
+    <div class="brand" data-tauri-drag-region>
       <div class="brand-icon">
         <img src={appIcon} alt="" />
       </div>
-      <h1>DS5 Dongle Config</h1>
+      <h1 data-tauri-drag-region>DS5 Dongle Config</h1>
     </div>
     
     <div class="toolbar compact-toolbar">
@@ -946,6 +959,11 @@
       <button class="settings-btn" type="button" onclick={() => (showSettingsModal = true)} aria-label={text.settings} title={text.settings}>
         <Icon name="settings" size={17} />
       </button>
+      <div class="window-controls">
+        <button type="button" aria-label="최소화" title="최소화" onclick={minimizeWindow}>−</button>
+        <button type="button" aria-label="최대화" title="최대화" onclick={toggleMaximizeWindow}>□</button>
+        <button class="close" type="button" aria-label="닫기" title="닫기" onclick={closeWindow}>×</button>
+      </div>
     </div>
   </header>
 
