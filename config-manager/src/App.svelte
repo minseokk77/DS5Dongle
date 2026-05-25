@@ -481,7 +481,7 @@
         const isFallback = caps.build_channel?.startsWith('fallback:');
         setDiagnosticCheck('capabilities', {
           state: 'passed',
-          message: isFallback ? `${text.fallbackCapability}: ${text.configVersion} v${caps.config_version}` : `v${caps.protocol_version} / config v${caps.config_version}`
+          message: isFallback ? text.featureReportFallback : text.diagnosticPassed
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : text.errorUnknown;
