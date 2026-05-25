@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "ds5-bridge-config-tauri"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "hidapi",
  "reqwest 0.12.28",

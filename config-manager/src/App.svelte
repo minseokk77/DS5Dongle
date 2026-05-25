@@ -78,7 +78,7 @@
     right_stick_min_y: -1,
     right_stick_max_y: 1
   };
-  const appVersion = '0.0.1.7';
+  const appVersion = '0.0.1.8';
   const releaseChannel = 'debug';
   const updateRepository = 'minseokk77/DS5Dongle';
   const updateStepOrder: UpdateStepCode[] = ['backup', 'checking', 'bootloader', 'copying', 'waiting', 'restoring', 'done'];
