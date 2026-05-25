@@ -18,6 +18,22 @@
     message: string;
   }
 
+  interface DeviceDiagnostics {
+    dongleConnected: boolean;
+    controllerConnected: boolean;
+    gamepadModalOpen: boolean;
+    batteryReportAvailable: boolean;
+    rssiReportAvailable: boolean;
+    configReadable: boolean;
+  }
+
+  interface DiagnosticCheck {
+    key: string;
+    label: string;
+    state: 'waiting' | 'running' | 'passed' | 'failed' | 'skipped' | 'warning';
+    message: string;
+  }
+
   export let isOpen = false;
   export let lang: Lang;
   export let themeMode: ThemeMode;
@@ -33,6 +49,16 @@
   export let calibrationEnabled = false;
   export let leftCalibrationSummary = '';
   export let rightCalibrationSummary = '';
+  export let diagnostics: DeviceDiagnostics = {
+    dongleConnected: false,
+    controllerConnected: false,
+    gamepadModalOpen: false,
+    batteryReportAvailable: false,
+    rssiReportAvailable: false,
+    configReadable: false
+  };
+  export let diagnosticChecks: DiagnosticCheck[] = [];
+  export let diagnosticChecksRunning = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   export let text: any;
   export let onClose: () => void = () => {};
@@ -42,6 +68,7 @@
   export let onResetDefaults: () => void = () => {};
   export let onRecoveryFirmwareUpdate: () => void | Promise<void> = () => {};
   export let onExportLogs: () => void = () => {};
+  export let onRunDiagnostics: () => void | Promise<void> = () => {};
 
   function handleBackdropClick(event: MouseEvent) {
     if (event.currentTarget === event.target) {
@@ -129,6 +156,49 @@
             </div>
           {/each}
         </div>
+      </div>
+
+      <div class="settings-group">
+        <div>
+          <strong>{text.deviceDiagnostics}</strong>
+          <p>{text.deviceDiagnosticsDesc}</p>
+        </div>
+        <div class="diagnostic-grid">
+          <div class:ok={diagnostics.dongleConnected} class="diagnostic-item">
+            <span></span>
+            <strong>{text.diagDongle}</strong>
+            <p>{diagnostics.dongleConnected ? text.picoConnected : text.picoDisconnected}</p>
+          </div>
+          <div class:ok={diagnostics.controllerConnected} class="diagnostic-item">
+            <span></span>
+            <strong>{text.diagController}</strong>
+            <p>{diagnostics.controllerConnected ? text.controllerConnected : text.controllerDisconnected}</p>
+          </div>
+          <div class:ok={diagnostics.configReadable} class="diagnostic-item">
+            <span></span>
+            <strong>{text.diagConfig}</strong>
+            <p>{diagnostics.configReadable ? text.configReadable : text.configUnreadable}</p>
+          </div>
+          <div class:ok={diagnostics.batteryReportAvailable || diagnostics.rssiReportAvailable} class="diagnostic-item">
+            <span></span>
+            <strong>{text.diagTelemetry}</strong>
+            <p>{diagnostics.batteryReportAvailable || diagnostics.rssiReportAvailable ? text.telemetryReceived : text.telemetryWaiting}</p>
+          </div>
+        </div>
+        <button class="settings-action-btn" type="button" onclick={onRunDiagnostics} disabled={diagnosticChecksRunning}>
+          <Icon name="sliders" size={15} /> {diagnosticChecksRunning ? text.diagnosticRunning : text.runDiagnostics}
+        </button>
+        {#if diagnosticChecks.length > 0}
+          <div class="diagnostic-check-list">
+            {#each diagnosticChecks as check (check.key)}
+              <div class={`diagnostic-check check-${check.state}`}>
+                <span></span>
+                <strong>{check.label}</strong>
+                <p>{check.message || text.diagnosticWaiting}</p>
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <div class="settings-group">
@@ -350,6 +420,114 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     width: 100%;
+  }
+
+  .diagnostic-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .diagnostic-item {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr);
+    gap: 3px 9px;
+    align-items: center;
+    min-height: 50px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--control);
+  }
+
+  .diagnostic-item > span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #737780;
+  }
+
+  .diagnostic-item.ok > span {
+    background: #63e2b7;
+    box-shadow: 0 0 8px rgba(99, 226, 183, 0.4);
+  }
+
+  .diagnostic-item strong {
+    color: var(--text);
+    font-size: 0.82rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .diagnostic-item p {
+    grid-column: 2;
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .diagnostic-check-list {
+    display: grid;
+    gap: 6px;
+  }
+
+  .diagnostic-check {
+    display: grid;
+    grid-template-columns: 10px minmax(120px, 160px) minmax(0, 1fr);
+    gap: 9px;
+    align-items: start;
+    min-height: 34px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--control);
+  }
+
+  .diagnostic-check > span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #737780;
+  }
+
+  .diagnostic-check.check-running > span {
+    background: #2f6bff;
+    box-shadow: 0 0 8px rgba(47, 107, 255, 0.4);
+  }
+
+  .diagnostic-check.check-passed > span {
+    background: #63e2b7;
+    box-shadow: 0 0 8px rgba(99, 226, 183, 0.4);
+  }
+
+  .diagnostic-check.check-failed > span {
+    background: #ff6b6b;
+    box-shadow: 0 0 8px rgba(255, 107, 107, 0.35);
+  }
+
+  .diagnostic-check.check-warning > span {
+    background: #ffab00;
+    box-shadow: 0 0 8px rgba(255, 171, 0, 0.35);
+  }
+
+  .diagnostic-check strong {
+    color: var(--text);
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+
+  .diagnostic-check p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.7rem;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
   }
 
   .capability-item {

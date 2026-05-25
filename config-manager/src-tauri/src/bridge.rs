@@ -166,7 +166,7 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     let device = open_device(device_id)?;
 
     let firmware_result = read_feature_string(&device, settings.reports.firmware_version);
-    let capabilities_result = read_capabilities_from_device(&device, settings.reports.capabilities);
+    let capabilities_result = read_capabilities(device_id);
     let rssi_result = read_rssi(&device, settings.reports.rssi);
     let (battery_level, is_charging) = read_battery(&device, settings.reports.battery);
     let rssi_val = rssi_result.as_ref().ok().and_then(|v| *v);
@@ -226,7 +226,17 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
 pub fn read_capabilities(device_id: &str) -> Result<FirmwareCapabilities, BridgeError> {
     let settings = settings();
     let device = open_device(device_id)?;
-    read_capabilities_from_device(&device, settings.reports.capabilities)
+    match read_capabilities_from_device(&device, settings.reports.capabilities) {
+        Ok(capabilities) => Ok(capabilities),
+        Err(error) => {
+            let config = read_config(device_id)?;
+            Ok(infer_capabilities_from_config(
+                &config,
+                error.to_string(),
+                None,
+            ))
+        }
+    }
 }
 
 pub fn apply_config(device_id: &str, config: BridgeConfig) -> Result<(), BridgeError> {
@@ -627,6 +637,40 @@ fn read_capabilities_from_device(
         supports_stick_calibration: feature_flags & (1 << 5) != 0,
         supports_directional_stick_calibration: feature_flags & (1 << 6) != 0,
     })
+}
+
+fn infer_capabilities_from_config(
+    config: &BridgeConfig,
+    source_error: String,
+    controller_connected: Option<bool>,
+) -> FirmwareCapabilities {
+    let supports_v3 = config.config_version >= 3;
+    let mut feature_flags = 0_u32;
+    if supports_v3 {
+        feature_flags |= 1 << 0; // battery
+        feature_flags |= 1 << 1; // RSSI
+        feature_flags |= 1 << 2; // vibration test
+        feature_flags |= 1 << 3; // adaptive trigger
+        feature_flags |= 1 << 4; // bootloader command
+        feature_flags |= 1 << 5; // stick calibration
+        feature_flags |= 1 << 6; // directional stick calibration
+    }
+
+    FirmwareCapabilities {
+        protocol_version: 1,
+        config_version: config.config_version,
+        config_body_length: settings().config.body_length.min(u8::MAX as usize) as u8,
+        build_channel: Some(format!("fallback: {source_error}")),
+        controller_connected,
+        feature_flags,
+        supports_battery: supports_v3,
+        supports_rssi: supports_v3,
+        supports_vibration_test: supports_v3,
+        supports_adaptive_trigger: supports_v3,
+        supports_bootloader_command: supports_v3,
+        supports_stick_calibration: supports_v3,
+        supports_directional_stick_calibration: supports_v3,
+    }
 }
 
 fn read_capability_string(payload: &[u8], length_offset: usize, value_offset: usize) -> Option<String> {

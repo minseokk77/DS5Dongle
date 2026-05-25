@@ -84,13 +84,11 @@ function Update-ProjectVersionFiles {
     [string]$BundleVersion
   )
 
-  $appPath = Join-Path $configManager "src\App.svelte"
   $packagePath = Join-Path $configManager "package.json"
   $cargoPath = Join-Path $configManager "src-tauri\Cargo.toml"
   $cargoLockPath = Join-Path $configManager "src-tauri\Cargo.lock"
   $tauriConfigPath = Join-Path $configManager "src-tauri\tauri.conf.json"
 
-  Set-TextFileUtf8 $appPath ((Get-Content -Raw -Encoding UTF8 $appPath) -replace "const appVersion = '[^']+';", "const appVersion = '$ReleaseVersion';")
   Set-TextFileUtf8 $packagePath ((Get-Content -Raw -Encoding UTF8 $packagePath) -replace '"version":\s*"[^"]+"', """version"": ""$BundleVersion""")
   Set-TextFileUtf8 $cargoPath ((Get-Content -Raw -Encoding UTF8 $cargoPath) -replace '(?m)^version\s*=\s*"[^"]+"', "version = ""$BundleVersion""")
   Set-TextFileUtf8 $cargoLockPath ((Get-Content -Raw -Encoding UTF8 $cargoLockPath) -replace '(name = "ds5-bridge-config-tauri"\s+version = )"[^"]+"', "`${1}""$BundleVersion""")
@@ -110,7 +108,6 @@ if (-not $Tag) {
   Push-Location $repoRoot
   try {
     $versionFiles = @(
-      (Join-Path $configManager "src\App.svelte"),
       (Join-Path $configManager "package.json"),
       (Join-Path $configManager "src-tauri\Cargo.toml"),
       (Join-Path $configManager "src-tauri\Cargo.lock"),
@@ -174,6 +171,53 @@ $($assetLines -join "`n")
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($notesPath, $notes, $utf8NoBom)
   return $notesPath
+}
+
+function Test-ReleaseAssets {
+  param(
+    [string]$Tag,
+    [string]$Repository,
+    [string[]]$ExpectedAssets
+  )
+
+  foreach ($asset in $ExpectedAssets) {
+    $item = Get-Item -LiteralPath $asset
+    if ($item.Length -le 0) {
+      throw "릴리즈 에셋 크기가 0입니다: $($item.Name)"
+    }
+  }
+
+  $uploadedAssets = @(gh release view $Tag --repo $Repository --json assets --jq '.assets[].name')
+  $missingAssets = @()
+  foreach ($asset in $ExpectedAssets) {
+    $name = Split-Path -Leaf $asset
+    if ($uploadedAssets -notcontains $name) {
+      $missingAssets += $name
+    }
+  }
+  if ($missingAssets.Count -gt 0) {
+    throw "릴리즈 업로드 후 누락된 에셋이 있습니다: $($missingAssets -join ', ')"
+  }
+
+  $msiAssets = @($uploadedAssets | Where-Object { $_ -like "*.msi" })
+  if ($msiAssets.Count -gt 0) {
+    throw "MSI 에셋은 업로드하지 않습니다: $($msiAssets -join ', ')"
+  }
+
+  $uf2Assets = @($uploadedAssets | Where-Object { $_ -eq "ds5-bridge-debug-$Tag.uf2" })
+  if ($uf2Assets.Count -ne 1) {
+    throw "펌웨어 UF2 에셋 검증 실패: ds5-bridge-debug-$Tag.uf2"
+  }
+
+  $exeAssets = @($uploadedAssets | Where-Object { $_ -like "*.exe" })
+  if ($exeAssets.Count -ne 1) {
+    throw "앱 설치 EXE 에셋은 정확히 1개여야 합니다: $($exeAssets -join ', ')"
+  }
+
+  $unexpectedAssets = @($uploadedAssets | Where-Object { $_ -notlike "*.exe" -and $_ -notlike "*.uf2" })
+  if ($unexpectedAssets.Count -gt 0) {
+    throw "허용하지 않은 릴리즈 에셋이 있습니다: $($unexpectedAssets -join ', ')"
+  }
 }
 
 Push-Location $repoRoot
@@ -251,6 +295,10 @@ try {
   if ($assets.Count -eq 0) {
     throw "업로드할 릴리즈 에셋을 찾지 못했습니다."
   }
+  $stagedExeAssets = @($assets | Where-Object { $_ -like "*.exe" })
+  if ($stagedExeAssets.Count -ne 1) {
+    throw "스테이징된 앱 설치 EXE는 정확히 1개여야 합니다: $($stagedExeAssets -join ', ')"
+  }
 
   $releaseNotesPath = New-ReleaseNotesFile -Tag $Tag -Repository $Repository -AssetStage $assetStage -Assets $assets
 
@@ -265,6 +313,7 @@ try {
   }
 
   gh release upload $Tag --repo $Repository @assets --clobber
+  Test-ReleaseAssets -Tag $Tag -Repository $Repository -ExpectedAssets $assets
   & (Join-Path $repoRoot "scripts\verify-release-source.ps1") -Tag $Tag -Repository $Repository
 }
 finally {

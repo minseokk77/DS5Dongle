@@ -447,7 +447,8 @@
   }
 
   .preset-controls {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(160px, 260px) 48px 132px 96px 96px;
     align-items: center;
     justify-content: flex-end;
     gap: 6px;
@@ -464,13 +465,14 @@
     font-size: 0.8rem;
     outline: none;
     cursor: pointer;
-    width: clamp(190px, 34%, 290px);
+    width: 100%;
     min-width: 150px;
-    max-width: 290px;
+    max-width: none;
     height: 32px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    grid-column: 1;
   }
 
   .preset-state {
@@ -481,6 +483,7 @@
     white-space: nowrap;
     color: var(--muted);
     font-size: 0.76rem;
+    grid-column: 2;
   }
 
   .preset-state.modified {
@@ -504,6 +507,10 @@
     transition: background 0.15s;
     white-space: nowrap;
     flex: 0 0 auto;
+    min-width: 0;
+    grid-column: 3;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .preset-tool-btn {
@@ -523,6 +530,17 @@
     transition: filter 0.15s;
     white-space: nowrap;
     flex: 0 0 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .preset-tool-btn:nth-of-type(2) {
+    grid-column: 4;
+  }
+
+  .preset-tool-btn:nth-of-type(3) {
+    grid-column: 5;
   }
 
   .preset-tool-btn:hover {

@@ -164,6 +164,10 @@ h1 { margin: 0; font-size: clamp(1.35rem, 3vw, 1.92rem); font-weight: 450; lette
   box-shadow: var(--card-shadow);
 }
 
+.window-controls.compact {
+  grid-template-columns: repeat(2, 34px);
+}
+
 .window-controls button {
   height: 100%;
   display: grid;

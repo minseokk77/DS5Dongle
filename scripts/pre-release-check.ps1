@@ -21,6 +21,17 @@ Require-Command rg
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $configManager = Join-Path $repoRoot "config-manager"
 
+function Get-ReleaseVersionFromBundle {
+  param([string]$BundleVersion)
+
+  if ($BundleVersion -notmatch '^0\.0\.(\d{2,})$') {
+    throw "번들 버전은 0.0.xx 형식이어야 합니다: $BundleVersion"
+  }
+
+  $compactPatch = $Matches[1]
+  return "0.0.$($compactPatch.Substring(0, $compactPatch.Length - 1)).$($compactPatch.Substring($compactPatch.Length - 1))"
+}
+
 Push-Location $repoRoot
 try {
   Push-Location $configManager
@@ -32,6 +43,32 @@ try {
   }
 
   cargo check --manifest-path ".\config-manager\src-tauri\Cargo.toml"
+
+  $tauriConfigPath = Join-Path $configManager "src-tauri\tauri.conf.json"
+  $packagePath = Join-Path $configManager "package.json"
+  $cargoPath = Join-Path $configManager "src-tauri\Cargo.toml"
+  $tauriConfig = Get-Content -Raw -Encoding UTF8 $tauriConfigPath | ConvertFrom-Json
+  $targets = @($tauriConfig.bundle.targets)
+  if ($targets -contains "msi" -or $targets -contains "all") {
+    throw "릴리즈 빌드 대상에 MSI가 포함되어 있습니다. bundle.targets는 nsis만 허용합니다."
+  }
+
+  $packageJson = Get-Content -Raw -Encoding UTF8 $packagePath | ConvertFrom-Json
+  $releaseVersion = if ($Tag) { $Tag.TrimStart("v") } else { Get-ReleaseVersionFromBundle -BundleVersion $packageJson.version }
+  if ($releaseVersion -notmatch '^0\.0\.(\d+)\.(\d+)$') {
+    throw "앱 버전은 0.0.x.x 형식이어야 합니다: $releaseVersion"
+  }
+  $bundleVersion = "0.0.$($Matches[1])$($Matches[2])"
+  $cargoToml = Get-Content -Raw -Encoding UTF8 $cargoPath
+  if ($packageJson.version -ne $bundleVersion) {
+    throw "package.json 버전($($packageJson.version))이 앱 릴리즈 버전($releaseVersion)의 번들 버전($bundleVersion)과 다릅니다."
+  }
+  if ($tauriConfig.version -ne $bundleVersion) {
+    throw "tauri.conf.json 버전($($tauriConfig.version))이 번들 버전($bundleVersion)과 다릅니다."
+  }
+  if ($cargoToml -notmatch "(?m)^version\s*=\s*`"$([regex]::Escape($bundleVersion))`"") {
+    throw "Cargo.toml 버전이 번들 버전($bundleVersion)과 다릅니다."
+  }
 
   $mojibakePattern = [string]::Join("|", @([char]0xfffd, [char]0x8adb, [char]0xc891, [char]0xc7fe, [char]0xb5e3))
   $mojibake = rg -n $mojibakePattern config-manager\src config-manager\src-tauri --glob "!config-manager/src-tauri/target/**"

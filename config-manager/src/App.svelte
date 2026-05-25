@@ -15,11 +15,14 @@
     checkDebugFirmwareUpdate,
     flashLatestDebugFirmware,
     listDevices,
+    readCapabilities,
     readConfig,
     readDeviceInfo,
     reconnectUsb,
     recoveryFlashLatestDebugFirmware,
     saveConfig,
+    testAdaptiveTrigger,
+    testVibration,
     type BridgeConfig,
     type BridgeDevice,
     type DeviceInfo,
@@ -52,6 +55,33 @@
     reason: string;
   }
 
+  interface DeviceDiagnostics {
+    dongleConnected: boolean;
+    controllerConnected: boolean;
+    gamepadModalOpen: boolean;
+    batteryReportAvailable: boolean;
+    rssiReportAvailable: boolean;
+    configReadable: boolean;
+  }
+
+  type ConnectionState = 'missing' | 'present' | 'ready' | 'stale' | 'error';
+
+  interface DeviceStateModel {
+    dongle: ConnectionState;
+    controller: ConnectionState;
+    gamepad: ConnectionState;
+    battery: ConnectionState;
+    rssi: ConnectionState;
+    config: ConnectionState;
+  }
+
+  interface DiagnosticCheck {
+    key: string;
+    label: string;
+    state: 'waiting' | 'running' | 'passed' | 'failed' | 'skipped' | 'warning';
+    message: string;
+  }
+
   const defaultConfig: BridgeConfig = {
     config_version: 3,
     haptics_gain: 1,
@@ -78,7 +108,7 @@
     right_stick_min_y: -1,
     right_stick_max_y: 1
   };
-  const appVersion = '0.0.1.8';
+  const appVersion = displayReleaseVersion(__APP_VERSION__);
   const releaseChannel = 'debug';
   const updateRepository = 'minseokk77/DS5Dongle';
   const updateStepOrder: UpdateStepCode[] = ['backup', 'checking', 'bootloader', 'copying', 'waiting', 'restoring', 'done'];
@@ -110,6 +140,7 @@
   let deviceInfoRefreshTimer: number | undefined;
   let devicePresenceRefreshTimer: number | undefined;
   let delayedInfoRefreshTimer: number | undefined;
+  let telemetryClockTimer: number | undefined;
   let isBusy = false;
   let errorText = '';
   let autoFirmwareUpdate = false;
@@ -119,6 +150,14 @@
   let updateStep: UpdateStepCode = 'idle';
   let showUpdateProgressModal = false;
   let lastUpdateError = '';
+  let telemetryClock = Date.now();
+  let lastRssi: number | null = null;
+  let lastRssiSeenAt = 0;
+  let lastBatteryLevel: number | null = null;
+  let lastBatteryCharging: boolean | null = null;
+  let lastBatterySeenAt = 0;
+  let diagnosticChecks: DiagnosticCheck[] = [];
+  let diagnosticChecksRunning = false;
 
   $: text = i18n[lang];
   $: effectiveTheme = themeMode === 'system' ? systemTheme : themeMode;
@@ -131,17 +170,27 @@
   $: bridgeStatusText = isBridgeConnected ? text.picoConnected : text.picoDisconnected;
   $: firmwareLabel = formatFirmwareVersion(deviceInfo.firmware_version);
   $: settingsFirmwareVersion = formatFirmwareVersion(deviceInfo.firmware_version);
+  $: displayedRssi = deviceInfo.rssi ?? (telemetryClock - lastRssiSeenAt <= 15000 ? lastRssi : null);
+  $: rssiIsStale = deviceInfo.rssi === undefined || deviceInfo.rssi === null ? displayedRssi !== null : false;
   $: rssiLabel =
-    deviceInfo.rssi === null || deviceInfo.rssi === undefined ? text.unknown : `${deviceInfo.rssi} dBm`;
+    displayedRssi === null || displayedRssi === undefined ? text.unknown : `${displayedRssi} dBm${rssiIsStale ? ` · ${text.previousValue}` : ''}`;
   $: usbVendorLabel = deviceInfo.usb_vendor_name || '';
   $: usbSpeedLabel = localizeUsbSpeed(deviceInfo.usb_speed_class || '');
   $: rssiStatusLabel = localizeSignalStatus(deviceInfo.rssi_strength_label || '');
-  $: batteryLevel = deviceInfo.battery_level !== undefined && deviceInfo.battery_level !== null ? deviceInfo.battery_level : null;
-  $: isCharging = deviceInfo.is_charging !== undefined && deviceInfo.is_charging !== null ? deviceInfo.is_charging : null;
+  $: batteryLevel = deviceInfo.battery_level !== undefined && deviceInfo.battery_level !== null
+    ? deviceInfo.battery_level
+    : (telemetryClock - lastBatterySeenAt <= 15000 ? lastBatteryLevel : null);
+  $: batteryIsStale = deviceInfo.battery_level === undefined || deviceInfo.battery_level === null ? batteryLevel !== null : false;
+  $: isCharging = deviceInfo.is_charging !== undefined && deviceInfo.is_charging !== null
+    ? deviceInfo.is_charging
+    : (telemetryClock - lastBatterySeenAt <= 15000 ? lastBatteryCharging : null);
   $: deviceTitle = showControllerUi && selectedDevice
     ? `${selectedDevice.label.split(' - ')[0]} · ${selectedDevice.vendor_id.toString(16).padStart(4, '0').toUpperCase()}:${selectedDevice.product_id.toString(16).padStart(4, '0').toUpperCase()}`
     : text.controllerDisconnected;
   $: firmwareCapabilities = buildFirmwareCapabilities();
+  $: diagnosticStateKey = diagnosticChecks.map((check) => `${check.key}:${check.state}`).join('|');
+  $: deviceStateModel = buildDeviceStateModel(diagnosticStateKey);
+  $: deviceDiagnostics = buildDeviceDiagnostics(deviceStateModel);
   $: updateStepText = updateStep === 'idle' ? '' : text.updateSteps[updateStep];
   $: updateProgress = updateStepProgress(updateStep);
   $: calibrationEnabled = Boolean(config.stick_calibration_enabled);
@@ -180,8 +229,12 @@
     // 장치 상태를 주기적으로 갱신합니다.
     void refreshDevices();
     deviceInfoRefreshTimer = window.setInterval(() => {
+      telemetryClock = Date.now();
       void refreshDeviceInfoOnly();
     }, 2500);
+    telemetryClockTimer = window.setInterval(() => {
+      telemetryClock = Date.now();
+    }, 1000);
     devicePresenceRefreshTimer = window.setInterval(() => {
       void syncDevicePresence();
     }, 3000);
@@ -214,6 +267,9 @@
       }
       if (delayedInfoRefreshTimer !== undefined) {
         window.clearTimeout(delayedInfoRefreshTimer);
+      }
+      if (telemetryClockTimer !== undefined) {
+        window.clearInterval(telemetryClockTimer);
       }
       if (unlisten) unlisten();
     };
@@ -286,6 +342,17 @@
     return semanticVersion ? semanticVersion[0] : primary;
   }
 
+  function displayReleaseVersion(bundleVersion: string) {
+    const normalized = bundleVersion.trim();
+    const compact = normalized.match(/^0\.0\.(\d{2,})$/);
+    if (!compact) {
+      return normalized;
+    }
+
+    const compactPatch = compact[1];
+    return `0.0.${compactPatch.slice(0, -1)}.${compactPatch.slice(-1)}`;
+  }
+
   function isCurrentFirmware(updateVersion: string) {
     const current = normalizeFirmwareVersion(deviceInfo.firmware_version).toLowerCase();
     const latest = normalizeFirmwareVersion(updateVersion).toLowerCase();
@@ -300,7 +367,7 @@
     const hasBridge = Boolean(selectedDeviceId) || devices.length > 0 || statusCode !== 'noDevice';
     const caps = deviceInfo.capabilities;
     const legacyReason = hasBridge ? text.legacyFirmwareCapabilityUnknown : text.capRequiresBridge;
-    const legacySupported = new Set(['vibration', 'trigger', 'bootloader']);
+    const legacySupported = new Set(['vibration', 'trigger', 'bootloader', 'calibration']);
     const capability = (key: string, label: string, supported?: boolean): FirmwareCapability => ({
       key,
       label,
@@ -312,17 +379,170 @@
       ...(caps?.supports_battery || deviceInfo.battery_report_available
         ? [capability('battery', text.capBattery, caps?.supports_battery ?? true)]
         : []),
-      ...(caps?.supports_rssi || deviceInfo.rssi_report_available
-        ? [capability('rssi', text.capRssi, caps?.supports_rssi ?? true)]
-        : []),
       capability('vibration', text.capVibration, caps?.supports_vibration_test),
       capability('trigger', text.capAdaptiveTrigger, caps?.supports_adaptive_trigger),
-      capability('bootloader', text.capBootloader, caps?.supports_bootloader_command),
-      capability('calibration', text.stickCalibration, caps?.supports_stick_calibration ?? config.config_version >= 3),
-      ...(caps?.supports_directional_stick_calibration
-        ? [capability('directionalCalibration', text.capDirectionalCalibration, true)]
-        : [])
+      capability('bootloader', text.capFirmwareUpdate, caps?.supports_bootloader_command),
+      capability('calibration', text.stickCalibration, caps?.supports_stick_calibration ?? config.config_version >= 3)
     ];
+  }
+
+  function buildDeviceDiagnostics(model: DeviceStateModel): DeviceDiagnostics {
+    return {
+      dongleConnected: model.dongle === 'ready' || model.dongle === 'present',
+      controllerConnected: model.controller === 'ready' || model.controller === 'present',
+      gamepadModalOpen: showInputTesterModal,
+      batteryReportAvailable: model.battery === 'ready' || model.battery === 'stale',
+      rssiReportAvailable: model.rssi === 'ready' || model.rssi === 'stale',
+      configReadable: model.config === 'ready' || model.config === 'stale'
+    };
+  }
+
+  function buildDeviceStateModel(_diagnosticStateKey: string): DeviceStateModel {
+    const telemetryFreshMs = 15000;
+    const deviceInfoPassed = diagnosticCheckState('deviceInfo') === 'passed';
+    const configPassed = diagnosticCheckState('config') === 'passed';
+    const telemetryPassed = diagnosticCheckState('telemetry') === 'passed';
+    const hasTelemetry = Boolean(deviceInfo.battery_report_available || deviceInfo.rssi_report_available || displayedRssi !== null || batteryLevel !== null || telemetryPassed);
+    return {
+      dongle: isBridgeConnected || deviceInfoPassed || Boolean(selectedDeviceId) ? 'ready' : 'missing',
+      controller: isControllerConnected || hasTelemetry ? 'ready' : 'missing',
+      gamepad: showInputTesterModal ? 'present' : 'missing',
+      battery: deviceInfo.battery_report_available
+        ? 'ready'
+        : (telemetryClock - lastBatterySeenAt <= telemetryFreshMs || telemetryPassed ? 'stale' : 'missing'),
+      rssi: deviceInfo.rssi_report_available
+        ? 'ready'
+        : (telemetryClock - lastRssiSeenAt <= telemetryFreshMs || telemetryPassed ? 'stale' : 'missing'),
+      config: deviceInfo.config_readable || configPassed ? 'ready' : (originalConfig ? 'stale' : 'missing')
+    };
+  }
+
+  function diagnosticCheckState(key: string): DiagnosticCheck['state'] | undefined {
+    return diagnosticChecks.find((check) => check.key === key)?.state;
+  }
+
+  function rememberTelemetry(info: DeviceInfo) {
+    if (info.rssi !== undefined && info.rssi !== null) {
+      lastRssi = info.rssi;
+      lastRssiSeenAt = Date.now();
+    }
+    if (info.battery_level !== undefined && info.battery_level !== null) {
+      lastBatteryLevel = info.battery_level;
+      lastBatteryCharging = info.is_charging ?? false;
+      lastBatterySeenAt = Date.now();
+    }
+  }
+
+  function resetDeviceTelemetry() {
+    lastRssi = null;
+    lastRssiSeenAt = 0;
+    lastBatteryLevel = null;
+    lastBatteryCharging = null;
+    lastBatterySeenAt = 0;
+  }
+
+  function makeDiagnosticChecks(): DiagnosticCheck[] {
+    return [
+      { key: 'deviceInfo', label: text.diagCheckDeviceInfo, state: 'waiting', message: '' },
+      { key: 'capabilities', label: text.diagCheckCapabilities, state: 'waiting', message: '' },
+      { key: 'config', label: text.diagCheckConfig, state: 'waiting', message: '' },
+      { key: 'vibration', label: text.capVibration, state: 'waiting', message: '' },
+      { key: 'trigger', label: text.capAdaptiveTrigger, state: 'waiting', message: '' },
+      { key: 'telemetry', label: text.diagTelemetry, state: 'waiting', message: '' }
+    ];
+  }
+
+  function setDiagnosticCheck(key: string, patch: Partial<DiagnosticCheck>) {
+    diagnosticChecks = diagnosticChecks.map((check) => (check.key === key ? { ...check, ...patch } : check));
+  }
+
+  async function runDeviceDiagnosticChecks() {
+    diagnosticChecks = makeDiagnosticChecks();
+    diagnosticChecksRunning = true;
+    const deviceId = selectedDeviceId;
+    if (!deviceId) {
+      diagnosticChecks = diagnosticChecks.map((check) => ({ ...check, state: 'skipped', message: text.capRequiresBridge }));
+      diagnosticChecksRunning = false;
+      return;
+    }
+
+    try {
+      setDiagnosticCheck('deviceInfo', { state: 'running', message: text.status.reading });
+      const info = await readDeviceInfo(deviceId);
+      deviceInfo = info;
+      rememberTelemetry(info);
+      setStatus('connected');
+      setDiagnosticCheck('deviceInfo', { state: 'passed', message: text.diagnosticPassed });
+
+      setDiagnosticCheck('capabilities', { state: 'running', message: text.status.reading });
+      try {
+        const caps = await readCapabilities(deviceId);
+        deviceInfo = { ...deviceInfo, capabilities: caps, capabilities_error: null };
+        const isFallback = caps.build_channel?.startsWith('fallback:');
+        setDiagnosticCheck('capabilities', {
+          state: 'passed',
+          message: isFallback ? `${text.fallbackCapability}: ${text.configVersion} v${caps.config_version}` : `v${caps.protocol_version} / config v${caps.config_version}`
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : text.errorUnknown;
+        const isHidParameterError = message.includes('os error 87') || message.includes('매개 변수');
+        setDiagnosticCheck('capabilities', {
+          state: isHidParameterError ? 'warning' : 'failed',
+          message: isHidParameterError ? text.featureReportFallback : message
+        });
+        addLog(`${text.diagCheckCapabilities}: ${message}`, isHidParameterError ? 'info' : 'error');
+      }
+
+      setDiagnosticCheck('config', { state: 'running', message: text.status.reading });
+      try {
+        const readback = await readConfig(deviceId);
+        config = readback;
+        originalConfig = structuredClone(readback);
+        setDiagnosticCheck('config', { state: 'passed', message: `v${readback.config_version}` });
+      } catch (error) {
+        setDiagnosticCheck('config', { state: 'failed', message: error instanceof Error ? error.message : text.errorUnknown });
+        addLog(`${text.diagCheckConfig}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
+      }
+
+      const caps = deviceInfo.capabilities;
+      const legacyTestSupport = Boolean(config.config_version >= 3);
+      const supportsVibrationTest = caps ? caps.supports_vibration_test : legacyTestSupport;
+      const supportsAdaptiveTrigger = caps ? caps.supports_adaptive_trigger : legacyTestSupport;
+
+      if (supportsVibrationTest) {
+        setDiagnosticCheck('vibration', { state: 'running', message: text.vibrationRunning });
+        try {
+          await testVibration(deviceId, 0.15, 0.15, 120);
+          setDiagnosticCheck('vibration', { state: 'passed', message: text.diagnosticPassed });
+        } catch (error) {
+          setDiagnosticCheck('vibration', { state: 'failed', message: error instanceof Error ? error.message : text.errorUnknown });
+          addLog(`${text.vibrationTestFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
+        }
+      } else {
+        setDiagnosticCheck('vibration', { state: 'skipped', message: text.capUnsupportedByFirmware });
+      }
+
+      if (supportsAdaptiveTrigger) {
+        setDiagnosticCheck('trigger', { state: 'running', message: text.adaptiveTriggerRunning });
+        try {
+          await testAdaptiveTrigger(deviceId, 'right', 0.25, 0.25, 120);
+          setDiagnosticCheck('trigger', { state: 'passed', message: text.diagnosticPassed });
+        } catch (error) {
+          setDiagnosticCheck('trigger', { state: 'failed', message: error instanceof Error ? error.message : text.errorUnknown });
+          addLog(`${text.adaptiveTriggerFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
+        }
+      } else {
+        setDiagnosticCheck('trigger', { state: 'skipped', message: text.capUnsupportedByFirmware });
+      }
+
+      const telemetryOk = Boolean(deviceInfo.battery_report_available || deviceInfo.rssi_report_available || displayedRssi !== null || batteryLevel !== null);
+      setDiagnosticCheck('telemetry', {
+        state: telemetryOk ? 'passed' : 'skipped',
+        message: telemetryOk ? text.telemetryReceived : text.telemetryWaiting
+      });
+    } finally {
+      diagnosticChecksRunning = false;
+    }
   }
 
   function updateStepProgress(step: UpdateStepCode) {
@@ -369,9 +589,9 @@
 
   function configMismatchDetails(verified: BridgeConfig, expected: BridgeConfig): ConfigMismatch[] {
     const details: ConfigMismatch[] = [];
-    const stickTolerance = 1 / 127 + 0.001;
-    const percentTolerance = 0.051;
-    const floatTolerance = 0.001;
+    const stickTolerance = 0.012;
+    const percentTolerance = 0.2;
+    const floatTolerance = 0.02;
 
     const checkExact = (field: keyof BridgeConfig) => {
       if (verified[field] !== expected[field]) {
@@ -421,21 +641,28 @@
     return details;
   }
 
+  function isCalibrationMismatch(field: keyof BridgeConfig) {
+    return String(field).startsWith('left_stick_') || String(field).startsWith('right_stick_') || field === 'stick_calibration_enabled';
+  }
+
   async function saveAndVerify(deviceId: string, nextConfig: BridgeConfig) {
     await applyConfig(deviceId, nextConfig);
     await saveConfig(deviceId);
     const verified = await readConfig(deviceId);
     const mismatchDetails = configMismatchDetails(verified, nextConfig);
     if (mismatchDetails.length > 0) {
-      addLog(text.settingsVerifyMismatch, 'error', { mismatches: mismatchDetails });
+      const visibleMismatches = mismatchDetails.filter((detail) => !isCalibrationMismatch(detail.field));
+      addLog(visibleMismatches.length > 0 ? text.settingsVerifyMismatch : text.settingsVerifyAdjusted, visibleMismatches.length > 0 ? 'error' : 'info', { mismatches: mismatchDetails });
       mismatchDetails.forEach((detail) =>
         addLog(
           `${text.settingsVerifyMismatch}: ${String(detail.field)} expected=${String(detail.expected)}, actual=${String(detail.actual)}`,
-          'error',
+          visibleMismatches.length > 0 ? 'error' : 'info',
           detail
         )
       );
-      showToast(text.settingsVerifyMismatch, 'error');
+      if (visibleMismatches.length > 0) {
+        showToast(text.settingsVerifyMismatch, 'error');
+      }
     }
     config = verified;
     originalConfig = structuredClone(verified);
@@ -447,11 +674,14 @@
       app_version: appVersion,
       firmware_version: settingsFirmwareVersion,
       device_state: {
+        model: deviceStateModel,
         dongle_connected: isBridgeConnected,
         controller_connected: isControllerConnected,
         gamepad_modal_open: showInputTesterModal,
         battery_report_available: Boolean(deviceInfo.battery_report_available),
         rssi_report_available: Boolean(deviceInfo.rssi_report_available),
+        battery_value_stale: batteryIsStale,
+        rssi_value_stale: rssiIsStale,
         config_readable: Boolean(deviceInfo.config_readable)
       },
       last_update_step: updateStep,
@@ -462,6 +692,7 @@
         capabilities_error: deviceInfo.capabilities_error ?? null
       },
       capabilities: deviceInfo.capabilities ?? null,
+      diagnostic_checks: diagnosticChecks,
       logs: diagnosticLogs
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
@@ -511,6 +742,7 @@
         selectedDeviceId = '';
         originalConfig = null;
         deviceInfo = emptyDeviceInfo();
+        resetDeviceTelemetry();
         setStatus('noDevice');
         return;
       }
@@ -542,6 +774,7 @@
       const nextInfo = await readDeviceInfo(deviceId);
       if (selectedDeviceId === deviceId) {
         deviceInfo = nextInfo;
+        rememberTelemetry(nextInfo);
       }
     } catch (error) {
       addLog(`${text.logDeviceInfoFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
@@ -561,6 +794,7 @@
         selectedDeviceId = '';
         originalConfig = null;
         deviceInfo = emptyDeviceInfo();
+        resetDeviceTelemetry();
         setStatus('noDevice');
       }
     } catch {
@@ -569,6 +803,7 @@
       devices = [];
       originalConfig = null;
       deviceInfo = emptyDeviceInfo();
+      resetDeviceTelemetry();
       setStatus('noDevice');
     }
   }
@@ -594,6 +829,7 @@
 
     if (infoResult.status === 'fulfilled') {
       deviceInfo = infoResult.value;
+      rememberTelemetry(infoResult.value);
     } else {
       addLog(`${text.logDeviceInfoFailed}: ${infoResult.reason}`, 'error');
     }
@@ -757,7 +993,7 @@
 
   async function verifyFirmwareAfterUpdate(deviceId: string, expectedVersion: string) {
     if (!deviceId) {
-      return;
+      return false;
     }
 
     const summary: {
@@ -774,6 +1010,7 @@
     try {
       const info = await readDeviceInfo(deviceId);
       deviceInfo = info;
+      rememberTelemetry(info);
       summary.firmware_version = info.firmware_version;
       summary.capabilities = info.capabilities ?? null;
       if (!isCurrentFirmware(expectedVersion)) {
@@ -796,9 +1033,12 @@
     }
 
     if (summary.errors.length > 0) {
-      addLog(`${text.status.updated}: ${text.viewLogs}`, 'error', summary);
+      addLog(`${text.updateInstallVerifyFailed}: ${text.viewLogs}`, 'error', summary);
+      showToast(text.updateInstallVerifyFailed, 'error');
+      return false;
     } else {
       addLog(`${text.status.updated}: ${expectedVersion}`, 'info', summary);
+      return true;
     }
   }
 
@@ -824,7 +1064,12 @@
       try {
         await saveAndVerify(restoredDeviceId, preservedConfig);
         await readAll();
-        await verifyFirmwareAfterUpdate(restoredDeviceId, expectedVersion);
+        const verifiedUpdate = await verifyFirmwareAfterUpdate(restoredDeviceId, expectedVersion);
+        if (!verifiedUpdate) {
+          updateStep = 'failed';
+          statusOverride = '';
+          return false;
+        }
         statusOverride = '';
         addLog(text.settingsRestored);
         return true;
@@ -933,10 +1178,6 @@
     await getCurrentWindow().minimize();
   }
 
-  async function toggleMaximizeWindow() {
-    await getCurrentWindow().toggleMaximize();
-  }
-
   async function closeWindow() {
     await getCurrentWindow().close();
   }
@@ -959,9 +1200,8 @@
       <button class="settings-btn" type="button" onclick={() => (showSettingsModal = true)} aria-label={text.settings} title={text.settings}>
         <Icon name="settings" size={17} />
       </button>
-      <div class="window-controls">
+      <div class="window-controls compact">
         <button type="button" aria-label="최소화" title="최소화" onclick={minimizeWindow}>−</button>
-        <button type="button" aria-label="최대화" title="최대화" onclick={toggleMaximizeWindow}>□</button>
         <button class="close" type="button" aria-label="닫기" title="닫기" onclick={closeWindow}>×</button>
       </div>
     </div>
@@ -983,12 +1223,13 @@
     {deviceTitle}
     {firmwareLabel}
     {rssiLabel}
-    rssi={deviceInfo.rssi}
+    rssi={displayedRssi}
     {usbVendorLabel}
     {usbSpeedLabel}
     {rssiStatusLabel}
     {batteryLevel}
     {isCharging}
+    {batteryIsStale}
     {text}
     onRefreshDevices={refreshDevices}
     onDeviceChanged={onDeviceChanged}
@@ -1043,6 +1284,9 @@
     {calibrationEnabled}
     {leftCalibrationSummary}
     {rightCalibrationSummary}
+    diagnostics={deviceDiagnostics}
+    {diagnosticChecks}
+    {diagnosticChecksRunning}
     capabilities={firmwareCapabilities}
     logs={diagnosticLogs}
     {text}
@@ -1053,6 +1297,7 @@
     onResetDefaults={resetToDefaults}
     onRecoveryFirmwareUpdate={onRecoveryFirmwareUpdate}
     onExportLogs={exportDiagnosticLogs}
+    onRunDiagnostics={runDeviceDiagnosticChecks}
   />
 
   {#if showUpdateProgressModal}

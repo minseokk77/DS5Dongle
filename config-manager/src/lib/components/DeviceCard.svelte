@@ -17,6 +17,7 @@
     rssiStatusLabel = "",
     batteryLevel = null,
     isCharging = null,
+    batteryIsStale = false,
     text,
     onRefreshDevices,
     onDeviceChanged,
@@ -35,6 +36,7 @@
     rssiStatusLabel?: string;
     batteryLevel?: number | null;
     isCharging?: boolean | null;
+    batteryIsStale?: boolean;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     text: any;
     onRefreshDevices: () => Promise<void>;
@@ -135,6 +137,9 @@
             </span>
             <span style="color: {isCharging ? '#10b981' : (batteryLevel <= 10 ? '#ff4d4f' : 'var(--meta-text)')}; transition: color 0.3s;">
               {batteryLevel}%
+              {#if batteryIsStale}
+                <span style="font-size: 0.72rem; color: var(--meta-faint); font-weight: 400; margin-left: 2px;">({text.previousValue})</span>
+              {/if}
               {#if isCharging}
                 <span style="font-size: 0.72rem; color: #63e2b7; font-weight: 400; margin-left: 2px;">({text.charging})</span>
               {/if}
