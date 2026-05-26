@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { listen } from '@tauri-apps/api/event';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { invoke } from '@tauri-apps/api/core';
+  import { emitTo, listen } from '@tauri-apps/api/event';
+  import { currentMonitor, getCurrentWindow, LogicalPosition } from '@tauri-apps/api/window';
+  import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import appIcon from './assets/app-icon.svg';
   import Icon from './lib/Icon.svelte';
   import { i18n, type Lang, type StatusCode } from './lib/i18n';
@@ -30,6 +32,7 @@
   } from './lib/api';
 
   type ThemeMode = 'light' | 'dark' | 'system';
+  type CloseBehavior = 'tray' | 'exit';
   type DiagnosticKind = 'info' | 'error';
   type UpdateStepCode = 'idle' | 'backup' | 'checking' | 'bootloader' | 'copying' | 'waiting' | 'restoring' | 'done' | 'latest' | 'failed';
 
@@ -82,6 +85,10 @@
     message: string;
   }
 
+  const isVolumeOverlayWindow = new URLSearchParams(window.location.search).get('overlay') === 'volume';
+  const volumeOverlayLabel = 'volume-osd';
+  const volumeOverlayWidth = 320;
+  const volumeOverlayHeight = 96;
   const defaultConfig: BridgeConfig = {
     config_version: 3,
     haptics_gain: 1,
@@ -126,6 +133,7 @@
 
   let lang: Lang = 'ko';
   let themeMode: ThemeMode = 'system';
+  let closeBehavior: CloseBehavior = 'tray';
   let systemTheme: 'light' | 'dark' = 'dark';
   let devices: BridgeDevice[] = [];
   let selectedDeviceId = '';
@@ -141,6 +149,7 @@
   let devicePresenceRefreshTimer: number | undefined;
   let delayedInfoRefreshTimer: number | undefined;
   let telemetryClockTimer: number | undefined;
+  let volumeOverlayPollTimer: number | undefined;
   let isBusy = false;
   let errorText = '';
   let autoFirmwareUpdate = false;
@@ -158,18 +167,28 @@
   let lastBatterySeenAt = 0;
   let diagnosticChecks: DiagnosticCheck[] = [];
   let diagnosticChecksRunning = false;
+  let volumeOverlayWindow: WebviewWindow | null = null;
+  let volumeOverlayPollBusy = false;
+  let lastObservedSpeakerVolume = Math.round(defaultConfig.speaker_volume_percent);
+  let overlayVolume = 0;
+  let overlayVisible = false;
+  let overlayHideTimer: number | undefined;
 
   $: text = i18n[lang];
   $: effectiveTheme = themeMode === 'system' ? systemTheme : themeMode;
   $: selectedDevice = devices.find((device) => device.id === selectedDeviceId) ?? null;
+  $: isConfigOnlyMode = Boolean(selectedDevice?.config_only);
   $: isBridgeConnected = Boolean(selectedDeviceId && selectedDevice && deviceInfo.dongle_connected !== false && statusCode !== 'noDevice');
   $: isControllerConnected = Boolean(isBridgeConnected && deviceInfo.controller_connected);
   $: showControllerUi = isControllerConnected;
   $: isDirty = originalConfig ? JSON.stringify(originalConfig) !== JSON.stringify(config) : false;
   $: statusText = statusOverride || text.status[statusCode];
-  $: bridgeStatusText = isBridgeConnected ? text.picoConnected : text.picoDisconnected;
+  $: bridgeStatusText = isBridgeConnected
+    ? (isConfigOnlyMode ? text.configOnlyMode : text.picoConnected)
+    : text.picoDisconnected;
   $: firmwareLabel = formatFirmwareVersion(deviceInfo.firmware_version);
   $: settingsFirmwareVersion = formatFirmwareVersion(deviceInfo.firmware_version);
+  $: versionCompatibilityWarning = buildVersionCompatibilityWarning();
   $: displayedRssi = deviceInfo.rssi ?? (telemetryClock - lastRssiSeenAt <= 15000 ? lastRssi : null);
   $: rssiIsStale = deviceInfo.rssi === undefined || deviceInfo.rssi === null ? displayedRssi !== null : false;
   $: rssiLabel =
@@ -206,6 +225,39 @@
   );
 
   onMount(() => {
+    if (isVolumeOverlayWindow) {
+      document.documentElement.classList.add('volume-overlay-document');
+      document.body.classList.add('volume-overlay-body');
+      let unlistenOverlay: (() => void) | undefined;
+
+      const setupOverlayListener = async () => {
+        unlistenOverlay = await listen<{ volume: number }>('volume-overlay-show', (event) => {
+          overlayVolume = Math.max(0, Math.min(100, Math.round(Number(event.payload?.volume ?? 0))));
+          overlayVisible = true;
+          void getCurrentWindow().show();
+          if (overlayHideTimer !== undefined) {
+            window.clearTimeout(overlayHideTimer);
+          }
+          overlayHideTimer = window.setTimeout(() => {
+            overlayVisible = false;
+            window.setTimeout(() => {
+              void getCurrentWindow().hide();
+              overlayHideTimer = undefined;
+            }, 160);
+          }, 1100);
+        });
+      };
+
+      void setupOverlayListener();
+
+      return () => {
+        if (overlayHideTimer !== undefined) {
+          window.clearTimeout(overlayHideTimer);
+        }
+        if (unlistenOverlay) unlistenOverlay();
+      };
+    }
+
     // 저장된 언어와 테마 설정을 먼저 반영합니다.
     const savedLang = localStorage.getItem('ds5:lang');
     if (savedLang === 'ko' || savedLang === 'en' || savedLang === 'zh') {
@@ -215,6 +267,11 @@
     const savedTheme = localStorage.getItem('ds5:themeMode');
     if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
       themeMode = savedTheme;
+    }
+
+    const savedCloseBehavior = localStorage.getItem('ds5:closeBehavior');
+    if (savedCloseBehavior === 'tray' || savedCloseBehavior === 'exit') {
+      closeBehavior = savedCloseBehavior;
     }
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
@@ -238,6 +295,9 @@
     devicePresenceRefreshTimer = window.setInterval(() => {
       void syncDevicePresence();
     }, 3000);
+    volumeOverlayPollTimer = window.setInterval(() => {
+      void pollExternalSpeakerVolume();
+    }, 450);
 
     let unlisten: (() => void) | undefined;
 
@@ -270,6 +330,9 @@
       }
       if (telemetryClockTimer !== undefined) {
         window.clearInterval(telemetryClockTimer);
+      }
+      if (volumeOverlayPollTimer !== undefined) {
+        window.clearInterval(volumeOverlayPollTimer);
       }
       if (unlisten) unlisten();
     };
@@ -321,6 +384,11 @@
     localStorage.setItem('ds5:themeMode', nextTheme);
   }
 
+  function handleCloseBehaviorChange(nextBehavior: CloseBehavior) {
+    closeBehavior = nextBehavior;
+    localStorage.setItem('ds5:closeBehavior', nextBehavior);
+  }
+
   function setAutoFirmwareUpdate(enabled: boolean) {
     autoFirmwareUpdate = enabled;
     localStorage.setItem('ds5:autoFirmwareUpdate', String(enabled));
@@ -351,6 +419,20 @@
 
     const compactPatch = compact[1];
     return `0.0.${compactPatch.slice(0, -1)}.${compactPatch.slice(-1)}`;
+  }
+
+  function comparableReleaseVersion(version: string) {
+    return normalizeFirmwareVersion(version).replace(/^v/i, '').toLowerCase();
+  }
+
+  function buildVersionCompatibilityWarning() {
+    const appComparable = comparableReleaseVersion(appVersion);
+    const firmwareComparable = comparableReleaseVersion(settingsFirmwareVersion);
+    if (!selectedDeviceId || !appComparable || !firmwareComparable || settingsFirmwareVersion === text.unknown) {
+      return '';
+    }
+
+    return appComparable === firmwareComparable ? '' : `${text.versionMismatchWarning}: ${text.appVersion} ${appVersion} / ${text.firmwareVersion} ${settingsFirmwareVersion}`;
   }
 
   function isCurrentFirmware(updateVersion: string) {
@@ -666,6 +748,7 @@
     }
     config = verified;
     originalConfig = structuredClone(verified);
+    lastObservedSpeakerVolume = Math.round(Number(verified.speaker_volume_percent) || 0);
   }
 
   function exportDiagnosticLogs() {
@@ -830,12 +913,16 @@
     if (infoResult.status === 'fulfilled') {
       deviceInfo = infoResult.value;
       rememberTelemetry(infoResult.value);
+      if (selectedDevice?.config_only && infoResult.value.controller_connected) {
+        statusOverride = text.dualSenseModeSwitching;
+      }
     } else {
       addLog(`${text.logDeviceInfoFailed}: ${infoResult.reason}`, 'error');
     }
     if (configResult.status === 'fulfilled') {
       config = configResult.value;
       originalConfig = structuredClone(configResult.value);
+      lastObservedSpeakerVolume = Math.round(Number(configResult.value.speaker_volume_percent) || 0);
     } else {
       throw configResult.reason;
     }
@@ -853,6 +940,95 @@
       await saveAndVerify(selectedDeviceId, config);
       setStatus('saved');
     });
+  }
+
+  function isEditingControl() {
+    const active = document.activeElement;
+    return active instanceof HTMLInputElement || active instanceof HTMLSelectElement || active instanceof HTMLTextAreaElement;
+  }
+
+  async function ensureVolumeOverlayWindow() {
+    const existing = await WebviewWindow.getByLabel(volumeOverlayLabel);
+    if (existing) {
+      volumeOverlayWindow = existing;
+      return existing;
+    }
+
+    const overlay = new WebviewWindow(volumeOverlayLabel, {
+      url: '/?overlay=volume',
+      title: '',
+      width: volumeOverlayWidth,
+      height: volumeOverlayHeight,
+      decorations: false,
+      transparent: true,
+      alwaysOnTop: true,
+      resizable: false,
+      focus: false,
+      focusable: false,
+      skipTaskbar: true,
+      shadow: false,
+      visible: false
+    });
+
+    volumeOverlayWindow = overlay;
+    overlay.once('tauri://error', () => {
+      volumeOverlayWindow = null;
+    });
+    await new Promise<void>((resolve) => {
+      overlay.once('tauri://created', () => resolve());
+      window.setTimeout(resolve, 700);
+    });
+    return overlay;
+  }
+
+  async function positionVolumeOverlay(windowRef: WebviewWindow) {
+    try {
+      const monitor = await currentMonitor();
+      if (!monitor) return;
+      const scale = monitor.scaleFactor || 1;
+      const x = monitor.position.x / scale + (monitor.size.width / scale - volumeOverlayWidth) / 2;
+      const monitorTop = monitor.position.y / scale;
+      const monitorHeight = monitor.size.height / scale;
+      const y = monitorTop + monitorHeight - 170;
+      await windowRef.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
+    } catch {
+      // 위치 조정 실패는 오버레이 표시 자체를 막지 않습니다.
+    }
+  }
+
+  async function showVolumeOverlay(volume: number) {
+    try {
+      const overlay = await ensureVolumeOverlayWindow();
+      await positionVolumeOverlay(overlay);
+      await emitTo(volumeOverlayLabel, 'volume-overlay-show', { volume });
+    } catch (error) {
+      addLog(`음량 오버레이 표시 실패: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
+    }
+  }
+
+  async function pollExternalSpeakerVolume() {
+    if (volumeOverlayPollBusy || !selectedDeviceId || !isBridgeConnected || isBusy || isEditingControl()) {
+      return;
+    }
+
+    volumeOverlayPollBusy = true;
+    const deviceId = selectedDeviceId;
+    try {
+      const nextConfig = await readConfig(deviceId);
+      if (selectedDeviceId !== deviceId) {
+        return;
+      }
+      const nextVolume = Math.max(0, Math.min(100, Math.round(Number(nextConfig.speaker_volume_percent) || 0)));
+      if (Math.abs(nextVolume - lastObservedSpeakerVolume) >= 1) {
+        config = { ...config, speaker_volume_percent: nextVolume };
+        lastObservedSpeakerVolume = nextVolume;
+        await showVolumeOverlay(nextVolume);
+      }
+    } catch {
+      // 오버레이용 폴링 실패는 일반 HID 오류 토스트로 올리지 않습니다.
+    } finally {
+      volumeOverlayPollBusy = false;
+    }
   }
 
   async function onReconnect() {
@@ -894,6 +1070,7 @@
       addLog(`${text.recoveryFirmwareUpdate}: ${result.version} / ${result.asset_name}`);
       showToast(`${text.status.updated}: ${result.version}`);
       await syncDevicePresence();
+      await verifyUsbPresentationAfterUpdate('recovery');
     });
     finishUpdateProgressModal();
   }
@@ -1042,6 +1219,35 @@
     }
   }
 
+  async function verifyUsbPresentationAfterUpdate(context: string) {
+    await sleep(1200);
+    await syncDevicePresence();
+    if (!selectedDeviceId) {
+      addLog(`${text.usbModeVerifyFailed}: ${text.picoDisconnected}`, 'error', { context });
+      return false;
+    }
+
+    try {
+      const info = await readDeviceInfo(selectedDeviceId);
+      deviceInfo = info;
+      rememberTelemetry(info);
+      const currentDevice = devices.find((device) => device.id === selectedDeviceId);
+      const configOnly = Boolean(currentDevice?.config_only);
+      const modeLabel = configOnly ? text.configOnlyMode : text.picoConnected;
+      if (configOnly && info.controller_connected) {
+        addLog(text.usbModeVerifyNeedsReconnect, 'error', { context, mode: modeLabel, controller_connected: info.controller_connected });
+        showToast(text.usbModeVerifyNeedsReconnect, 'error');
+        return false;
+      }
+
+      addLog(`${text.usbModeVerifyOk}: ${modeLabel}`, 'info', { context, controller_connected: info.controller_connected });
+      return true;
+    } catch (error) {
+      addLog(`${text.usbModeVerifyFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error', { context });
+      return false;
+    }
+  }
+
   async function restoreConfigAfterFirmwareUpdate(preservedConfig: BridgeConfig | null, previousDeviceId: string, expectedVersion: string) {
     if (!preservedConfig || !previousDeviceId) {
       return false;
@@ -1137,6 +1343,7 @@
     if (!shouldRestoreSettings && selectedDeviceId) {
       await verifyFirmwareAfterUpdate(selectedDeviceId, result.version);
     }
+    await verifyUsbPresentationAfterUpdate(options.automatic ? 'auto-update' : 'manual-update');
     if (shouldRestoreSettings && !settingsRestored) {
       if (options.automatic) {
         statusCode = previousStatus;
@@ -1179,10 +1386,31 @@
   }
 
   async function closeWindow() {
-    await getCurrentWindow().close();
+    if (closeBehavior === 'exit') {
+      await invoke('quit_app');
+      return;
+    }
+    await getCurrentWindow().hide();
   }
 </script>
 
+{#if isVolumeOverlayWindow}
+  <div
+    class:visible={overlayVisible}
+    class="volume-osd-shell"
+    role="status"
+    aria-label={text.speakerVolume}
+  >
+    <div class="volume-osd-icon"><Icon name="volume" size={20} /></div>
+    <div class="volume-osd-content">
+      <div class="volume-osd-label">{text.speakerVolume}</div>
+      <div class="volume-osd-meter">
+        <span style={`width: ${overlayVolume}%`}></span>
+      </div>
+    </div>
+    <strong>{overlayVolume}%</strong>
+  </div>
+{:else}
 <main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell" class:modal-open={showInputTesterModal || showSettingsModal || showUpdateProgressModal}>
   <header class="topbar" data-tauri-drag-region>
     <div class="brand" data-tauri-drag-region>
@@ -1274,10 +1502,12 @@
     isOpen={showSettingsModal}
     {lang}
     {themeMode}
+    {closeBehavior}
     isConnected={showControllerUi}
     {autoFirmwareUpdate}
     {appVersion}
     firmwareVersion={settingsFirmwareVersion}
+    versionWarning={versionCompatibilityWarning}
     {releaseChannel}
     {updateRepository}
     configVersion={`v${config.config_version}`}
@@ -1293,6 +1523,7 @@
     onClose={() => (showSettingsModal = false)}
     onLangChange={handleLangChange}
     onThemeChange={handleThemeChange}
+    onCloseBehaviorChange={handleCloseBehaviorChange}
     onAutoFirmwareUpdateChange={setAutoFirmwareUpdate}
     onResetDefaults={resetToDefaults}
     onRecoveryFirmwareUpdate={onRecoveryFirmwareUpdate}
@@ -1345,3 +1576,4 @@
     ></div>
   {/if}
 </main>
+{/if}

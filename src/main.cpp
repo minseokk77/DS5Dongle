@@ -3,6 +3,8 @@
 //
 
 #include <cstdio>
+#include <algorithm>
+#include <cmath>
 #include "bsp/board_api.h"
 #include "bt.h"
 #include "utils.h"
@@ -20,6 +22,7 @@
 #include "config.h"
 #include "cmd.h"
 #include "battery_led.h"
+#include "pico/time.h"
 
 // Pico SDK speciifically for waiting on conditions
 #include "pico/critical_section.h"
@@ -28,6 +31,9 @@ int reportSeqCounter = 0;
 uint8_t packetCounter = 0;
 bool spk_active = false;
 bool mute_button_was_down = false;
+bool mute_button_pending_toggle = false;
+bool mute_volume_combo_used = false;
+absolute_time_t next_volume_adjust_time = nil_time;
 
 uint8_t interrupt_in_data[63] = {
     0x7f, 0x7d, 0x7f, 0x7e, 0x00, 0x00, 0xa7,
@@ -42,6 +48,58 @@ uint8_t interrupt_in_data[63] = {
 
 critical_section_t report_cs;
 volatile bool report_dirty = false;
+
+void send_state_report();
+
+static float db_to_percent(float db) {
+    if (db <= -100.0f) {
+        return 0.0f;
+    }
+    if (db >= 0.0f) {
+        return 100.0f;
+    }
+    return std::clamp(powf(10.0f, db / 20.0f) * 100.0f, 0.0f, 100.0f);
+}
+
+static float percent_to_db(float percent) {
+    percent = std::clamp(percent, 0.0f, 100.0f);
+    if (percent <= 0.0f) {
+        return -100.0f;
+    }
+    return std::clamp(20.0f * log10f(percent / 100.0f), -100.0f, 0.0f);
+}
+
+static bool can_adjust_volume_now() {
+    return is_nil_time(next_volume_adjust_time) ||
+           absolute_time_diff_us(get_absolute_time(), next_volume_adjust_time) <= 0;
+}
+
+static bool adjust_speaker_volume_percent(float delta_percent) {
+    if (!can_adjust_volume_now()) {
+        return false;
+    }
+
+    auto config = get_config();
+    const float current_percent = db_to_percent(config.speaker_volume);
+    const float next_percent = std::clamp(roundf(current_percent / 5.0f) * 5.0f + delta_percent, 0.0f, 100.0f);
+    if (fabsf(next_percent - current_percent) < 0.5f) {
+        next_volume_adjust_time = make_timeout_time_ms(180);
+        return false;
+    }
+
+    config.speaker_volume = percent_to_db(next_percent);
+    set_config(config);
+    next_volume_adjust_time = make_timeout_time_ms(180);
+    printf("[Audio] Speaker volume adjusted by controller: %.0f%%\n", next_percent);
+    return true;
+}
+
+static void toggle_mic_mute() {
+    const bool next_muted = !state_get_mic_muted();
+    mute[1] = next_muted ? 1 : 0;
+    state_set_mic_muted(next_muted);
+    send_state_report();
+}
 
 void send_state_report() {
     uint8_t outputData[78]{};
@@ -99,12 +157,36 @@ void on_bt_data(CHANNEL_TYPE channel, uint8_t *data, uint16_t len) {
         if ((data[56] & 1) != (interrupt_in_data[53] & 1)) {
             set_headset(data[56] & 1);
         }
-        const bool mute_button_down = len > 12 && (data[12] & (1 << 2)) != 0;
+        const uint8_t *input_report = data + 3;
+        const uint16_t input_len = len > 3 ? len - 3 : 0;
+        const bool mute_button_down = input_len > 9 && (input_report[9] & (1 << 2)) != 0;
         if (mute_button_down && !mute_button_was_down) {
-            const bool next_muted = !state_get_mic_muted();
-            mute[1] = next_muted ? 1 : 0;
-            state_set_mic_muted(next_muted);
-            send_state_report();
+            mute_button_pending_toggle = true;
+            mute_volume_combo_used = false;
+        }
+        if (mute_button_down) {
+            const uint8_t shoulder_buttons = input_len > 8 ? input_report[8] : 0;
+            const bool l1_down = (shoulder_buttons & (1 << 0)) != 0;
+            const bool r1_down = (shoulder_buttons & (1 << 1)) != 0;
+            const bool r1_only = r1_down && !l1_down;
+            const bool l1_only = l1_down && !r1_down;
+            if (r1_only) {
+                if (adjust_speaker_volume_percent(5.0f)) {
+                    mute_volume_combo_used = true;
+                    mute_button_pending_toggle = false;
+                }
+            } else if (l1_only) {
+                if (adjust_speaker_volume_percent(-5.0f)) {
+                    mute_volume_combo_used = true;
+                    mute_button_pending_toggle = false;
+                }
+            }
+        } else if (mute_button_was_down) {
+            if (mute_button_pending_toggle && !mute_volume_combo_used) {
+                toggle_mic_mute();
+            }
+            mute_button_pending_toggle = false;
+            mute_volume_combo_used = false;
         }
         mute_button_was_down = mute_button_down;
 
@@ -263,6 +345,7 @@ int main() {
     critical_section_init(&report_cs);
 
     config_load();
+    usb_set_presentation_mode(USB_PRESENTATION_CONFIG_ONLY, true);
 
     bt_init();
     bt_register_data_callback(on_bt_data);

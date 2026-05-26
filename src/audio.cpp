@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include "opus.h"
 #include "utils.h"
 #include "pico/multicore.h"
@@ -23,6 +24,7 @@
 #define SAMPLE_SIZE       64
 #define REPORT_SIZE       398
 #define REPORT_ID         0x36
+#define AUDIO_FIFO_DEPTH  6
 // #define VOLUME_GAIN       2
 // #define BUFFER_LENGTH     48
 
@@ -42,6 +44,27 @@ critical_section_t opus_cs;
 struct audio_raw_element {
     float data[512 * 2];
 };
+
+static float db_to_gain(float db) {
+    if (db <= -100.0f) {
+        return 0.0f;
+    }
+    if (db > 0.0f) {
+        db = 0.0f;
+    }
+    return powf(10.0f, db / 20.0f);
+}
+
+static bool has_speaker_signal(const int16_t *raw, int frames) {
+    constexpr int16_t threshold = 32;
+    for (int i = 0; i < frames; i++) {
+        if (std::abs(raw[i * INPUT_CHANNELS]) > threshold ||
+            std::abs(raw[i * INPUT_CHANNELS + 1]) > threshold) {
+            return true;
+        }
+    }
+    return false;
+}
 
 void set_headset(bool state) {
     plug_headset = state;
@@ -83,7 +106,13 @@ void audio_loop() {
     WDL_ResampleSample *in_buf;
     int nframes = resampler.ResamplePrepare(frames, OUTPUT_CHANNELS, &in_buf);
 
-    const float audio_gain = mute[0] ? 0.0f : powf(10.0f, get_config().speaker_volume / 20.0f);
+    const float app_audio_gain = db_to_gain(get_config().speaker_volume);
+    const float windows_audio_gain = db_to_gain(volume[0]);
+    const float audio_gain = mute[0] ? 0.0f : app_audio_gain * windows_audio_gain;
+    const bool speaker_output_active = audio_gain > 0.0f && has_speaker_signal(raw, frames);
+    if (speaker_output_active) {
+        bt_note_activity();
+    }
     const float haptics_gain = get_config().haptics_gain;
     for (int i = 0; i < nframes; i++) {
  #if !DISABLE_SPEAKER_PROC       
@@ -169,7 +198,7 @@ void audio_init() {
     resampler.SetFeedMode(true);
     resampler.Prealloc(2, 24, 6);
  #if !DISABLE_SPEAKER_PROC
-    queue_init(&audio_fifo, sizeof(audio_raw_element), 2);
+    queue_init(&audio_fifo, sizeof(audio_raw_element), AUDIO_FIFO_DEPTH);
     critical_section_init(&opus_cs);
     multicore_launch_core1_with_stack(core1_entry, audio_core1_stack, sizeof(audio_core1_stack));
 #endif
@@ -207,9 +236,16 @@ void core1_entry() {
         resampler_audio.ResampleOut(out_buf, nframes, 480, 2);
 
         static uint8_t out[200];
-        (void) opus_encode_float(encoder, out_buf, 480, out, 200);
+        const opus_int32 encoded_bytes = opus_encode_float(encoder, out_buf, 480, out, sizeof(out));
+        if (encoded_bytes <= 0) {
+            printf("[Audio] Opus encode failed: %ld\n", static_cast<long>(encoded_bytes));
+            continue;
+        }
         critical_section_enter_blocking(&opus_cs);
-        memcpy(opus_buf, out, 200);
+        memcpy(opus_buf, out, encoded_bytes);
+        if (encoded_bytes < static_cast<opus_int32>(sizeof(opus_buf))) {
+            memset(opus_buf + encoded_bytes, 0, sizeof(opus_buf) - encoded_bytes);
+        }
         critical_section_exit(&opus_cs);
     }
 }

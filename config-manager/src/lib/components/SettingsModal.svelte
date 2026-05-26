@@ -4,6 +4,7 @@
   import type { Lang } from '../i18n';
 
   type ThemeMode = 'light' | 'dark' | 'system';
+  type CloseBehavior = 'tray' | 'exit';
   interface FirmwareCapability {
     key: string;
     label: string;
@@ -37,10 +38,12 @@
   export let isOpen = false;
   export let lang: Lang;
   export let themeMode: ThemeMode;
+  export let closeBehavior: CloseBehavior = 'tray';
   export let isConnected: boolean;
   export let autoFirmwareUpdate: boolean;
   export let appVersion = '';
   export let firmwareVersion = '';
+  export let versionWarning = '';
   export let releaseChannel = '';
   export let updateRepository = '';
   export let capabilities: FirmwareCapability[] = [];
@@ -64,6 +67,7 @@
   export let onClose: () => void = () => {};
   export let onLangChange: (lang: Lang) => void = () => {};
   export let onThemeChange: (themeMode: ThemeMode) => void = () => {};
+  export let onCloseBehaviorChange: (behavior: CloseBehavior) => void = () => {};
   export let onAutoFirmwareUpdateChange: (enabled: boolean) => void = () => {};
   export let onResetDefaults: () => void = () => {};
   export let onRecoveryFirmwareUpdate: () => void | Promise<void> = () => {};
@@ -78,6 +82,13 @@
 
   function handleAutoUpdateChange(event: Event) {
     onAutoFirmwareUpdateChange((event.currentTarget as HTMLInputElement).checked);
+  }
+
+  function handleCloseBehaviorChange(event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    if (value === 'tray' || value === 'exit') {
+      onCloseBehaviorChange(value);
+    }
   }
 </script>
 
@@ -112,6 +123,13 @@
           onThemeChange={onThemeChange}
           showStatus={false}
         />
+        <label class="settings-select-row">
+          <span>{text.closeButtonBehavior}</span>
+          <select value={closeBehavior} onchange={handleCloseBehaviorChange}>
+            <option value="tray">{text.closeToTray}</option>
+            <option value="exit">{text.closeToExit}</option>
+          </select>
+        </label>
       </div>
 
       <div class="settings-group">
@@ -129,6 +147,9 @@
           <span>{text.updateRepository}</span>
           <strong>{updateRepository}</strong>
         </div>
+        {#if versionWarning}
+          <div class="settings-warning">{versionWarning}</div>
+        {/if}
         <label class="settings-toggle-row">
           <span>{text.autoFirmwareUpdate}</span>
           <input type="checkbox" checked={autoFirmwareUpdate} onchange={handleAutoUpdateChange} />
@@ -370,6 +391,32 @@
     font-weight: 800;
   }
 
+  .settings-select-row {
+    min-height: 42px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 0 14px;
+    border-radius: 10px;
+    background: var(--control);
+    color: var(--text);
+    font-size: 0.84rem;
+    font-weight: 800;
+  }
+
+  .settings-select-row select {
+    min-width: 0;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--control-2);
+    color: var(--text);
+    font: inherit;
+  }
+
   .settings-action-btn {
     min-height: 48px;
     display: inline-flex;
@@ -413,6 +460,18 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .settings-warning {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    border-radius: 8px;
+    background: rgba(245, 158, 11, 0.08);
+    color: #fbbf24;
+    font-size: 0.78rem;
+    font-weight: 700;
+    box-sizing: border-box;
   }
 
   .capability-grid {

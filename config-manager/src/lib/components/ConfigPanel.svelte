@@ -100,6 +100,13 @@
     loadCustomPresets();
   });
 
+  $effect(() => {
+    const roundedSpeakerVolume = Math.round(Number(config.speaker_volume_percent) || 0);
+    if (config.speaker_volume_percent !== roundedSpeakerVolume) {
+      config.speaker_volume_percent = roundedSpeakerVolume;
+    }
+  });
+
   // Load custom presets from local storage.
   function loadCustomPresets() {
     try {
@@ -266,12 +273,6 @@
               </optgroup>
             {/if}
           </select>
-
-          {#if selectedPresetModified}
-            <span class="preset-state modified">
-              {text.modified}
-            </span>
-          {/if}
 
           <button 
             type="button" 
@@ -475,23 +476,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     grid-column: 1;
-  }
-
-  .preset-state {
-    position: absolute;
-    left: 0;
-    top: -16px;
-    max-width: 238px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--muted);
-    font-size: 0.68rem;
-    line-height: 1;
-  }
-
-  .preset-state.modified {
-    color: #ffab00;
   }
 
   .preset-save-btn {

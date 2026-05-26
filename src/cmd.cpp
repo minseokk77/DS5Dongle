@@ -14,6 +14,7 @@
 #include "device/usbd.h"
 #include "pico/bootrom.h"
 #include "pico/time.h"
+#include "usb.h"
 
 constexpr uint8_t CAPABILITY_PROTOCOL_VERSION = 1;
 constexpr uint32_t FEATURE_BATTERY = 1u << 0;
@@ -141,9 +142,7 @@ void pico_cmd_set(uint8_t report_id, uint8_t const *buffer, uint16_t bufsize) {
     }
     if (buffer[0] == 0x03) {
         printf("[CMD] Enter tud reconnect func\n");
-        tud_disconnect();
-        sleep_ms(150);
-        tud_connect();
+        usb_set_presentation_mode(usb_get_presentation_mode(), true);
     }
     if (buffer[0] == 0x04) {
         printf("[CMD] Enter USB bootloader\n");

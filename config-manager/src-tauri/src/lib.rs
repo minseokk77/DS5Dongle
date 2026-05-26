@@ -1,5 +1,9 @@
 use std::time::Duration;
-use tauri::Emitter;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager,
+};
 
 mod bridge;
 mod commands;
@@ -9,6 +13,53 @@ mod updater;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            if let Some(icon) = app.default_window_icon().cloned() {
+                let open_item = MenuItem::with_id(app, "open", "열기", true, None::<&str>)?;
+                let quit_item = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
+                let tray_menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+                let _ = TrayIconBuilder::new()
+                    .tooltip("DS5 Dongle Config")
+                    .icon(icon)
+                    .menu(&tray_menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| {
+                        match event.id().as_ref() {
+                            "open" => {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                            "quit" => app.exit(0),
+                            _ => {}
+                        }
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            if let Some(window) = tray.app_handle().get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    })
+                    .build(app);
+            }
+
+            if let Some(window) = app.get_webview_window("main") {
+                let main_window = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = main_window.hide();
+                    }
+                });
+            }
+
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let mut last_device_ids: Vec<String> = Vec::new();
@@ -48,7 +99,8 @@ pub fn run() {
             commands::test_adaptive_trigger,
             commands::check_debug_firmware_update,
             commands::flash_latest_debug_firmware,
-            commands::recovery_flash_latest_debug_firmware
+            commands::recovery_flash_latest_debug_firmware,
+            commands::quit_app
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 애플리케이션 실행 중 복구할 수 없는 오류가 발생했습니다.");

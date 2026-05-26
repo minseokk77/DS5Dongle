@@ -17,6 +17,7 @@
 #include "classic/sdp_server.h"
 #include "config.h"
 #include "state_mgr.h"
+#include "usb.h"
 #include "pico/util/queue.h"
 #if ENABLE_BATT_LED
 #include "battery_led.h"
@@ -52,6 +53,14 @@ struct send_element {
 };
 
 absolute_time_t inactive_time = 0; // 手柄长时间静默
+
+static void sync_usb_presentation() {
+    if (acl_handle != HCI_CON_HANDLE_INVALID && hid_control_cid != 0 && hid_interrupt_cid != 0 && !check_dse) {
+        usb_set_presentation_mode(USB_PRESENTATION_DUALSENSE_COMPOSITE, true);
+    } else {
+        usb_set_presentation_mode(USB_PRESENTATION_CONFIG_ONLY, true);
+    }
+}
 
 void bt_register_data_callback(bt_data_callback_t callback) {
     bt_data_callback = callback;
@@ -93,6 +102,12 @@ void bt_get_signal_strength(int8_t *rssi) {
 
 bool bt_is_controller_connected() {
     return acl_handle != HCI_CON_HANDLE_INVALID && hid_control_cid != 0 && hid_interrupt_cid != 0;
+}
+
+void bt_note_activity() {
+    if (bt_is_controller_connected()) {
+        inactive_time = get_absolute_time();
+    }
 }
 
 void bt_l2cap_init() {
@@ -335,9 +350,6 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
         }
 
         case HCI_EVENT_DISCONNECTION_COMPLETE: {
-#if !ENABLE_SERIAL
-            tud_disconnect();
-#endif
             gap_connectable_control(1);
             gap_discoverable_control(1);
             const uint8_t reason = hci_event_disconnection_complete_get_reason(packet);
@@ -348,6 +360,7 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
             hid_control_cid = 0;
             hid_interrupt_cid = 0;
             feature_data.clear();
+            sync_usb_presentation();
             cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
 #if ENABLE_BATT_LED
             battery_led_on_disconnect();
@@ -400,16 +413,12 @@ static void l2cap_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t 
                     printf("Connected DSE Controller\n");
                     check_dse = false;
                     is_dse = true;
-#if !ENABLE_SERIAL
-                    tud_connect();
-#endif
+                    sync_usb_presentation();
                 } else if (packet[0] == 0x02) {
                     printf("Connected DS5 Controller\n");
                     check_dse = false;
                     is_dse = false;
-#if !ENABLE_SERIAL
-                    tud_connect();
-#endif
+                    sync_usb_presentation();
                 }
             }
             if (packet[0] == 0xA3) {
@@ -470,7 +479,7 @@ static void l2cap_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t 
 
                     gap_connectable_control(false);
                     gap_discoverable_control(false);
-                    // tud_connect();
+                    sync_usb_presentation();
                 } else {
                     printf("[L2CAP] Unknown Channel psm: 0x%02X", psm);
                 }
@@ -510,6 +519,7 @@ static void l2cap_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t 
                 printf("[L2CAP] Channel closed cid=0x%04X\n", local_cid);
             }
             if (hid_control_cid == 0 && hid_interrupt_cid == 0) {
+                sync_usb_presentation();
                 bt_disconnect();
             }
             break;
@@ -543,8 +553,12 @@ void bt_write(const uint8_t *data, const uint16_t len) {
     fill_output_report_checksum(packet.data + 1, len);
 
     if (!queue_try_add(&send_fifo, &packet)) {
-        printf("[L2CAP bt_write] Error: Failed to add packet to send FIFO\n");
-        return;
+        send_element dropped{};
+        queue_try_remove(&send_fifo, &dropped);
+        if (!queue_try_add(&send_fifo, &packet)) {
+            printf("[L2CAP bt_write] Error: Failed to add packet to send FIFO\n");
+            return;
+        }
     }
     if (queue_get_level(&send_fifo) == 1) {
         l2cap_request_can_send_now_event(hid_interrupt_cid);

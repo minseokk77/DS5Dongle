@@ -1,6 +1,8 @@
 [usb]
 sony_vendor_id = 0x054c
 product_ids = [0x0ce6, 0x0df2]
+config_vendor_id = 0x1209
+config_product_ids = [0xd5c0]
 
 [reports]
 config_read = 0xf7

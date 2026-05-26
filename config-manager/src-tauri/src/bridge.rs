@@ -12,6 +12,7 @@ pub struct BridgeDevice {
     pub vendor_id: u16,
     pub product_id: u16,
     pub serial_number: Option<String>,
+    pub config_only: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -120,8 +121,10 @@ pub fn list_devices() -> Result<Vec<BridgeDevice>, BridgeError> {
     Ok(api
         .device_list()
         .filter(|device| {
-            device.vendor_id() == settings.usb.sony_vendor_id
-                && settings.usb.product_ids.contains(&device.product_id())
+            (device.vendor_id() == settings.usb.sony_vendor_id
+                && settings.usb.product_ids.contains(&device.product_id()))
+                || (device.vendor_id() == settings.usb.config_vendor_id
+                    && settings.usb.config_product_ids.contains(&device.product_id()))
         })
         .map(|device| {
             let product = device.product_string().unwrap_or("Unknown HID");
@@ -134,12 +137,16 @@ pub fn list_devices() -> Result<Vec<BridgeDevice>, BridgeError> {
                 .map(|value| Cow::Owned(format!(" - {value}")))
                 .unwrap_or(Cow::Borrowed(""));
 
+            let config_only = device.vendor_id() == settings.usb.config_vendor_id
+                && settings.usb.config_product_ids.contains(&product_id);
+
             BridgeDevice {
                 id: device.path().to_string_lossy().to_string(),
                 label: format!("{product} - {manufacturer} - PID {product_id:04x}{serial_label}"),
                 vendor_id: device.vendor_id(),
                 product_id,
                 serial_number: serial,
+                config_only,
             }
         })
         .collect())
@@ -420,7 +427,7 @@ fn decode_config(bytes: &[u8], settings: &AppSettings) -> Result<BridgeConfig, B
     let config = BridgeConfig {
         config_version: bytes[0],
         haptics_gain: f32::from_le_bytes(bytes[1..5].try_into().unwrap()),
-        speaker_volume_percent: (speaker_volume_db + 100.0).clamp(0.0, 100.0),
+        speaker_volume_percent: db_to_volume_percent(speaker_volume_db).round(),
         inactive_time: bytes[9],
         disable_inactive_disconnect: bytes[10] != 0,
         disable_pico_led: bytes[11] != 0,
@@ -452,9 +459,7 @@ fn encode_config(config: &BridgeConfig) -> Vec<u8> {
     let mut out = vec![0_u8; settings().config.body_length.max(15)];
     out[0] = settings().config.version;
     out[1..5].copy_from_slice(&config.haptics_gain.to_le_bytes());
-    out[5..9].copy_from_slice(
-        &(config.speaker_volume_percent.clamp(0.0, 100.0) - 100.0).to_le_bytes(),
-    );
+    out[5..9].copy_from_slice(&volume_percent_to_db(config.speaker_volume_percent).to_le_bytes());
     out[9] = config.inactive_time;
     out[10] = u8::from(config.disable_inactive_disconnect);
     out[11] = u8::from(config.disable_pico_led);
@@ -484,6 +489,25 @@ fn encode_config(config: &BridgeConfig) -> Vec<u8> {
     }
 
     out
+}
+
+fn db_to_volume_percent(db: f32) -> f32 {
+    if !db.is_finite() || db <= -100.0 {
+        return 0.0;
+    }
+    if db >= 0.0 {
+        return 100.0;
+    }
+    (10.0_f32.powf(db / 20.0) * 100.0).clamp(0.0, 100.0)
+}
+
+fn volume_percent_to_db(percent: f32) -> f32 {
+    let percent = percent.clamp(0.0, 100.0);
+    if percent <= 0.0 {
+        -100.0
+    } else {
+        (20.0 * (percent / 100.0).log10()).clamp(-100.0, 0.0)
+    }
 }
 
 fn validate_config(config: &BridgeConfig, settings: &AppSettings) -> Result<(), BridgeError> {

@@ -9,6 +9,7 @@ export interface BridgeDevice {
   vendor_id: number;
   product_id: number;
   serial_number?: string | null;
+  config_only: boolean;
 }
 
 export interface BridgeConfig {

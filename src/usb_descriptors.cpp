@@ -26,6 +26,7 @@
 #include "bsp/board_api.h"
 #include "tusb.h"
 #include "config.h"
+#include "usb.h"
 
 #ifndef ENABLE_SERIAL
 #define ENABLE_SERIAL 0
@@ -37,6 +38,11 @@ bool ds_mode() {
     }
     return get_config().controller_mode == 0;
 }
+
+constexpr uint16_t CONFIG_ONLY_VENDOR_ID = 0x1209;
+constexpr uint16_t CONFIG_ONLY_PRODUCT_ID = 0xD5C0;
+constexpr uint16_t CONFIG_ONLY_DESC_LEN_TOTAL = 41;
+constexpr uint16_t CONFIG_ONLY_HID_REPORT_DESC_LEN = 63;
 
 enum {
     ITF_NUM_AUDIO_CONTROL = 0,
@@ -60,6 +66,11 @@ enum {
 #if ENABLE_SERIAL
         + TUD_CDC_DESC_LEN
 #endif
+};
+
+enum {
+    ITF_NUM_CONFIG_HID = 0,
+    ITF_NUM_CONFIG_TOTAL,
 };
 
 // String Descriptor Index
@@ -110,13 +121,80 @@ tusb_desc_device_t desc_device =
 // Invoked when received GET DEVICE DESCRIPTOR
 // Application return pointer to descriptor
 uint8_t const *tud_descriptor_device_cb(void) {
-    desc_device.idProduct = ds_mode() ? 0x0CE6 : 0x0DF2;
+    if (usb_get_presentation_mode() == USB_PRESENTATION_CONFIG_ONLY) {
+        desc_device.bDeviceClass = 0x00;
+        desc_device.bDeviceSubClass = 0x00;
+        desc_device.bDeviceProtocol = 0x00;
+        desc_device.idVendor = CONFIG_ONLY_VENDOR_ID;
+        desc_device.idProduct = CONFIG_ONLY_PRODUCT_ID;
+    } else {
+#if ENABLE_SERIAL
+        desc_device.bDeviceClass = TUSB_CLASS_MISC;
+        desc_device.bDeviceSubClass = MISC_SUBCLASS_COMMON;
+        desc_device.bDeviceProtocol = MISC_PROTOCOL_IAD;
+#else
+        desc_device.bDeviceClass = 0x00;
+        desc_device.bDeviceSubClass = 0x00;
+        desc_device.bDeviceProtocol = 0x00;
+#endif
+        desc_device.idVendor = 0x054C;
+        desc_device.idProduct = ds_mode() ? 0x0CE6 : 0x0DF2;
+    }
     return reinterpret_cast<uint8_t const *>(&desc_device);
 }
 
 //--------------------------------------------------------------------+
 // Configuration Descriptor
 //--------------------------------------------------------------------+
+uint8_t descriptor_configuration_config_only[] = {
+    // --- CONFIGURATION DESCRIPTOR ---
+    0x09, // bLength
+    0x02, // bDescriptorType
+    U16_TO_U8S_LE(CONFIG_ONLY_DESC_LEN_TOTAL), // wTotalLength
+    ITF_NUM_CONFIG_TOTAL, // bNumInterfaces
+    0x01, // bConfigurationValue
+    0x00, // iConfiguration
+    0xC0, // bmAttributes: SELF-POWERED
+    0x32, // bMaxPower: 100mA
+
+    // --- INTERFACE DESCRIPTOR: Config Vendor HID ---
+    0x09, // bLength
+    0x04, // bDescriptorType
+    ITF_NUM_CONFIG_HID, // bInterfaceNumber
+    0x00, // bAlternateSetting
+    0x02, // bNumEndpoints: IN + OUT
+    0x03, // bInterfaceClass
+    0x00, // bInterfaceSubClass
+    0x00, // bInterfaceProtocol
+    0x00, // iInterface
+
+    // HID Descriptor
+    0x09, // bLength
+    0x21, // bDescriptorType
+    0x11, 0x01, // bcdHID
+    0x00, // bCountryCode
+    0x01, // bNumDescriptors
+    0x22, // bDescriptorType
+    U16_TO_U8S_LE(CONFIG_ONLY_HID_REPORT_DESC_LEN), // wDescriptorLength
+
+    // Endpoint Descriptor (HID IN: EP4)
+    0x07, // bLength
+    0x05, // bDescriptorType
+    0x84, // bEndpointAddress
+    0x03, // bmAttributes
+    0x40, 0x00, // wMaxPacketSize
+    0x01, // bInterval
+
+    // Endpoint Descriptor (HID OUT: EP3)
+    0x07, // bLength
+    0x05, // bDescriptorType
+    0x03, // bEndpointAddress
+    0x03, // bmAttributes
+    0x40, 0x00, // wMaxPacketSize
+    0x01, // bInterval
+};
+static_assert(sizeof(descriptor_configuration_config_only) == CONFIG_ONLY_DESC_LEN_TOTAL);
+
 uint8_t descriptor_configuration[] = {
     // --- CONFIGURATION DESCRIPTOR ---
     0x09, // bLength
@@ -392,6 +470,10 @@ uint8_t descriptor_configuration[] = {
 // Descriptor contents must exist long enough for transfer to complete
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
     (void) index; // for multiple configurations
+    if (usb_get_presentation_mode() == USB_PRESENTATION_CONFIG_ONLY) {
+        return descriptor_configuration_config_only;
+    }
+
     auto bInterval = 0x01;
     switch (get_config().polling_rate_mode) {
         case 0:
@@ -586,6 +668,7 @@ uint8_t const desc_hid_report_ds[] = {
     0xC0, // End Collection
     // 329 bytes
 };
+
 static_assert(sizeof(desc_hid_report_ds) == 0x0149);
 
 uint8_t const desc_hid_report_dse[] = {
@@ -813,11 +896,49 @@ uint8_t const desc_hid_report_dse[] = {
 };
 static_assert(sizeof(desc_hid_report_dse) == 0x01BD);
 
+uint8_t const desc_hid_report_config_only[] = {
+    0x06, 0x00, 0xFF, // Usage Page (Vendor Defined)
+    0x09, 0x01, // Usage (Vendor 1)
+    0xA1, 0x01, // Collection (Application)
+    0x15, 0x00, // Logical Minimum (0)
+    0x26, 0xFF, 0x00, // Logical Maximum (255)
+    0x75, 0x08, // Report Size (8)
+    0x85, 0xF5, // Report ID (battery)
+    0x09, 0x35, // Usage
+    0x95, 0x3F, // Report Count
+    0xB1, 0x02, // Feature
+    0x85, 0xF6, // Report ID (command)
+    0x09, 0x36, // Usage
+    0x95, 0x3F, // Report Count
+    0xB1, 0x02, // Feature
+    0x85, 0xF7, // Report ID (config)
+    0x09, 0x37, // Usage
+    0x95, 0x3F, // Report Count
+    0xB1, 0x02, // Feature
+    0x85, 0xF8, // Report ID (firmware version)
+    0x09, 0x38, // Usage
+    0x95, 0x3F, // Report Count
+    0xB1, 0x02, // Feature
+    0x85, 0xF9, // Report ID (RSSI)
+    0x09, 0x39, // Usage
+    0x95, 0x3F, // Report Count
+    0xB1, 0x02, // Feature
+    0x85, 0xFA, // Report ID (capabilities)
+    0x09, 0x3A, // Usage
+    0x95, 0x18, // Report Count
+    0xB1, 0x02, // Feature
+    0xC0, // End Collection
+};
+static_assert(sizeof(desc_hid_report_config_only) == CONFIG_ONLY_HID_REPORT_DESC_LEN);
+
 // Invoked when received GET HID REPORT DESCRIPTOR
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
     (void) itf;
+    if (usb_get_presentation_mode() == USB_PRESENTATION_CONFIG_ONLY) {
+        return desc_hid_report_config_only;
+    }
     if (ds_mode()) {
         return desc_hid_report_ds;
     }
@@ -832,7 +953,7 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf) {
 static char const *string_desc_arr[] =
 {
     (const char[]){0x09, 0x04}, // 0: is supported language is English (0x0409)
-    "Sony Interactive Entertainment", // 1: Manufacturer
+    NULL, // 1: Manufacturer
     NULL, // 2: Product
     NULL, // 3: Serials will use unique ID if possible
 #if ENABLE_SERIAL
@@ -848,9 +969,14 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
     (void) langid;
     size_t chr_count;
 
-    if (ds_mode()) {
+    if (usb_get_presentation_mode() == USB_PRESENTATION_CONFIG_ONLY) {
+        string_desc_arr[1] = "DS5 Dongle";
+        string_desc_arr[2] = "DS5 Dongle Config";
+    } else if (ds_mode()) {
+        string_desc_arr[1] = "Sony Interactive Entertainment";
         string_desc_arr[2] = "DualSense Wireless Controller";
     }else {
+        string_desc_arr[1] = "Sony Interactive Entertainment";
         string_desc_arr[2] = "DualSense Edge Wireless Controller";
     }
 

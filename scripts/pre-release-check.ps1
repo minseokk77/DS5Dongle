@@ -44,6 +44,11 @@ try {
 
   cargo check --manifest-path ".\config-manager\src-tauri\Cargo.toml"
 
+  $firmwareBuildScript = Join-Path $repoRoot "tools\build-windows.ps1"
+  if (-not (Test-Path -LiteralPath $firmwareBuildScript)) {
+    throw "펌웨어 빌드 스크립트를 찾지 못했습니다: $firmwareBuildScript"
+  }
+
   $tauriConfigPath = Join-Path $configManager "src-tauri\tauri.conf.json"
   $packagePath = Join-Path $configManager "package.json"
   $cargoPath = Join-Path $configManager "src-tauri\Cargo.toml"
@@ -68,6 +73,15 @@ try {
   }
   if ($cargoToml -notmatch "(?m)^version\s*=\s*`"$([regex]::Escape($bundleVersion))`"") {
     throw "Cargo.toml 버전이 번들 버전($bundleVersion)과 다릅니다."
+  }
+
+  & powershell -ExecutionPolicy Bypass -File $firmwareBuildScript -Variant debug -FirmwareVersion "v$releaseVersion"
+  $debugUf2 = Join-Path $repoRoot "tools\ds5-bridge-debug.uf2"
+  if (-not (Test-Path -LiteralPath $debugUf2)) {
+    throw "debug UF2가 생성되지 않았습니다: $debugUf2"
+  }
+  if ((Get-Item -LiteralPath $debugUf2).Length -le 0) {
+    throw "debug UF2 크기가 0입니다: $debugUf2"
   }
 
   $mojibakePattern = [string]::Join("|", @([char]0xfffd, [char]0x8adb, [char]0xc891, [char]0xc7fe, [char]0xb5e3))
