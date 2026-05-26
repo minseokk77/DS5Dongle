@@ -150,6 +150,8 @@
   let delayedInfoRefreshTimer: number | undefined;
   let telemetryClockTimer: number | undefined;
   let volumeOverlayPollTimer: number | undefined;
+  let deviceInfoRefreshBusy = false;
+  let devicePresenceRefreshBusy = false;
   let isBusy = false;
   let errorText = '';
   let autoFirmwareUpdate = false;
@@ -288,16 +290,16 @@
     deviceInfoRefreshTimer = window.setInterval(() => {
       telemetryClock = Date.now();
       void refreshDeviceInfoOnly();
-    }, 2500);
+    }, 4000);
     telemetryClockTimer = window.setInterval(() => {
       telemetryClock = Date.now();
     }, 1000);
     devicePresenceRefreshTimer = window.setInterval(() => {
       void syncDevicePresence();
-    }, 3000);
+    }, 9000);
     volumeOverlayPollTimer = window.setInterval(() => {
       void pollExternalSpeakerVolume();
-    }, 450);
+    }, 1200);
 
     let unlisten: (() => void) | undefined;
 
@@ -848,28 +850,38 @@
   }
 
   async function refreshDeviceInfoOnly() {
-    if (!selectedDeviceId || isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
+    if (!selectedDeviceId || deviceInfoRefreshBusy || isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
       return;
     }
 
+    deviceInfoRefreshBusy = true;
     const deviceId = selectedDeviceId;
     try {
       const nextInfo = await readDeviceInfo(deviceId);
       if (selectedDeviceId === deviceId) {
-        deviceInfo = nextInfo;
+        deviceInfo = {
+          ...deviceInfo,
+          ...nextInfo,
+          capabilities: deviceInfo.capabilities ?? nextInfo.capabilities ?? null,
+          capabilities_error: deviceInfo.capabilities_error ?? nextInfo.capabilities_error ?? null,
+          config_readable: deviceInfo.config_readable || nextInfo.config_readable
+        };
         rememberTelemetry(nextInfo);
       }
     } catch (error) {
       addLog(`${text.logDeviceInfoFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
       await syncDevicePresence();
+    } finally {
+      deviceInfoRefreshBusy = false;
     }
   }
 
   async function syncDevicePresence() {
-    if (isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
+    if (devicePresenceRefreshBusy || isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
       return;
     }
 
+    devicePresenceRefreshBusy = true;
     try {
       const latestDevices = await listDevices();
       devices = latestDevices;
@@ -888,6 +900,8 @@
       deviceInfo = emptyDeviceInfo();
       resetDeviceTelemetry();
       setStatus('noDevice');
+    } finally {
+      devicePresenceRefreshBusy = false;
     }
   }
 
@@ -905,9 +919,10 @@
     if (!selectedDeviceId) return;
     setStatus('reading');
 
-    const [infoResult, configResult] = await Promise.allSettled([
+    const [infoResult, configResult, capabilitiesResult] = await Promise.allSettled([
       readDeviceInfo(selectedDeviceId),
-      readConfig(selectedDeviceId)
+      readConfig(selectedDeviceId),
+      readCapabilities(selectedDeviceId)
     ]);
 
     if (infoResult.status === 'fulfilled') {
@@ -923,8 +938,18 @@
       config = configResult.value;
       originalConfig = structuredClone(configResult.value);
       lastObservedSpeakerVolume = Math.round(Number(configResult.value.speaker_volume_percent) || 0);
+      deviceInfo = { ...deviceInfo, config_readable: true };
     } else {
       throw configResult.reason;
+    }
+    if (capabilitiesResult.status === 'fulfilled') {
+      deviceInfo = { ...deviceInfo, capabilities: capabilitiesResult.value, capabilities_error: null };
+    } else {
+      deviceInfo = {
+        ...deviceInfo,
+        capabilities: deviceInfo.capabilities ?? null,
+        capabilities_error: capabilitiesResult.reason instanceof Error ? capabilitiesResult.reason.message : String(capabilitiesResult.reason)
+      };
     }
     setStatus('connected');
     scheduleDeviceInfoRefresh();
@@ -1007,7 +1032,7 @@
   }
 
   async function pollExternalSpeakerVolume() {
-    if (volumeOverlayPollBusy || !selectedDeviceId || !isBridgeConnected || isBusy || isEditingControl()) {
+    if (volumeOverlayPollBusy || !selectedDeviceId || !isBridgeConnected || !showControllerUi || isBusy || isEditingControl()) {
       return;
     }
 

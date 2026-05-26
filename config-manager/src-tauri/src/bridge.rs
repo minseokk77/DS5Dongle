@@ -173,20 +173,13 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     let device = open_device(device_id)?;
 
     let firmware_result = read_feature_string(&device, settings.reports.firmware_version);
-    let capabilities_result = read_capabilities(device_id);
     let rssi_result = read_rssi(&device, settings.reports.rssi);
     let (battery_level, is_charging) = read_battery(&device, settings.reports.battery);
     let rssi_val = rssi_result.as_ref().ok().and_then(|v| *v);
     let battery_report_available = battery_level.is_some();
     let rssi_report_available = rssi_val.is_some();
-    // 새 펌웨어는 기능 리포트에서 BT HID 채널 연결 상태를 직접 반환합니다.
-    // 구버전에서는 배터리 리포트 수신 여부를 컨트롤러 연결의 보수적인 대체 신호로 사용합니다.
-    let controller_connected = capabilities_result
-        .as_ref()
-        .ok()
-        .and_then(|capabilities| capabilities.controller_connected)
-        .unwrap_or(battery_report_available);
-    let config_readable = read_config(device_id).is_ok();
+    // 주기 갱신 경로에서는 무거운 기능/설정 리포트를 읽지 않고 배터리 리포트만 연결 신호로 사용합니다.
+    let controller_connected = battery_report_available;
 
     let manufacturer = device
         .get_manufacturer_string()
@@ -213,10 +206,10 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     Ok(DeviceInfo {
         firmware_version: firmware_result.as_ref().ok().and_then(Clone::clone),
         rssi: rssi_val,
-        capabilities: capabilities_result.as_ref().ok().cloned(),
+        capabilities: None,
         firmware_error: firmware_result.err().map(|error| error.to_string()),
         rssi_error: rssi_result.err().map(|error| error.to_string()),
-        capabilities_error: capabilities_result.err().map(|error| error.to_string()),
+        capabilities_error: None,
         usb_vendor_name: format!("{manufacturer} ({product_name})"),
         usb_speed_class,
         rssi_strength_label,
@@ -226,7 +219,7 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
         controller_connected,
         battery_report_available,
         rssi_report_available,
-        config_readable,
+        config_readable: false,
     })
 }
 
