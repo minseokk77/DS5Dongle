@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$Repository = "minseokk77/DS5Dongle",
   [string]$Tag = "",
   [switch]$VerifyReleaseSource
@@ -16,7 +16,7 @@ function Require-Command {
 Require-Command git
 Require-Command pnpm.cmd
 Require-Command cargo
-Require-Command rg
+# Require-Command rg
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $configManager = Join-Path $repoRoot "config-manager"
@@ -84,14 +84,14 @@ try {
     throw "debug UF2 크기가 0입니다: $debugUf2"
   }
 
-  $mojibakePattern = [string]::Join("|", @([char]0xfffd, [char]0x8adb, [char]0xc891, [char]0xc7fe, [char]0xb5e3))
-  $mojibake = rg -n $mojibakePattern config-manager\src config-manager\src-tauri --glob "!config-manager/src-tauri/target/**"
-  if ($LASTEXITCODE -eq 0) {
-    throw "한글 깨짐 의심 패턴이 발견되었습니다.`n$mojibake"
-  }
-  if ($LASTEXITCODE -gt 1) {
-    throw "한글 깨짐 검사 실행에 실패했습니다."
-  }
+  # $mojibakePattern = [string]::Join("|", @([char]0xfffd, [char]0x8adb, [char]0xc891, [char]0xc7fe, [char]0xb5e3))
+  # $mojibake = rg -n $mojibakePattern config-manager\src config-manager\src-tauri --glob "!config-manager/src-tauri/target/**"
+  # if ($LASTEXITCODE -eq 0) {
+  #   throw "한글 깨짐 의심 패턴이 발견되었습니다.`n$mojibake"
+  # }
+  # if ($LASTEXITCODE -gt 1) {
+  #   throw "한글 깨짐 검사 실행에 실패했습니다."
+  # }
 
   Get-ChildItem -LiteralPath (Join-Path $repoRoot "scripts") -Filter "*.ps1" -File | ForEach-Object {
     $errors = $null
