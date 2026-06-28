@@ -192,12 +192,12 @@ body.volume-overlay-body {
 }
 
 .topbar {
-  min-height: 70px;
+  min-height: 46px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 18px;
-  padding: 11px 13px;
+  padding: 6px 13px;
 }
 
 .brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
@@ -383,8 +383,8 @@ select { height: 36px; max-width: 260px; color: var(--text); background: var(--c
 .cards-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto minmax(0, 1fr); gap: 12px; align-items: stretch; align-content: stretch; flex-grow: 1; min-height: 0; }
 .config-card { background: var(--panel-soft); border-radius: 11px; padding: 12px; display: grid; align-content: start; box-shadow: var(--card-shadow); overflow: hidden; height: auto; }
 .config-card:not(.compact) {
-  grid-template-rows: 48px repeat(3, 42px);
-  row-gap: 7px;
+  grid-template-rows: 48px repeat(3, 34px);
+  row-gap: 11px;
 }
 .card-head { min-height: 38px; display: flex; gap: 9px; align-items: flex-start; margin-bottom: 6px; }
 .config-card:not(.compact) .card-head { min-height: 42px; margin-bottom: 0; }
@@ -394,7 +394,7 @@ select { height: 36px; max-width: 260px; color: var(--text); background: var(--c
 
 .control-row,
 .switch-row {
-  height: 42px;
+  height: 34px;
   display: grid;
   align-items: center;
   gap: 8px;
@@ -442,8 +442,9 @@ input[type="checkbox"]:checked::after { transform: translateX(14px); }
   flex-direction: column;
   height: 100%;
 }
-.config-card.compact .card-head { margin-bottom: 0; }
-.config-card.compact .field-label { margin-top: auto; }
+.config-card.compact .card-head { margin-bottom: 4px; }
+.config-card.compact .field-label { margin-top: auto; margin-bottom: 12px; }
+.config-card.compact .seg.wide { margin-top: auto; margin-bottom: 2px; }
 .field-label { display: block; margin: 4px 0 6px; }
 .seg.wide { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }
 .seg.wide button { min-width: 0; font-size: .78rem; }

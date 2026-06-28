@@ -115,7 +115,7 @@
     right_stick_min_y: -1,
     right_stick_max_y: 1
   };
-  const appVersion = displayReleaseVersion(__APP_VERSION__);
+  const appVersion = '0.0.2.3';
   const releaseChannel = 'debug';
   const updateRepository = 'minseokk77/DS5Dongle';
   const updateStepOrder: UpdateStepCode[] = ['backup', 'checking', 'bootloader', 'copying', 'waiting', 'restoring', 'done'];
@@ -1438,14 +1438,7 @@
 {:else}
 <main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell" class:modal-open={showInputTesterModal || showSettingsModal || showUpdateProgressModal}>
   <header class="topbar" data-tauri-drag-region>
-    <div class="brand" data-tauri-drag-region>
-      <div class="brand-icon">
-        <img src={appIcon} alt="" />
-      </div>
-      <h1 data-tauri-drag-region>DS5 Dongle Config</h1>
-    </div>
-    
-    <div class="toolbar compact-toolbar">
+    <div class="toolbar compact-toolbar" data-tauri-drag-region>
       <div class:connected={showControllerUi} class="status-pill">
         <span><Icon name="check" size={10} /></span>
         {showControllerUi ? text.controllerConnected : text.controllerDisconnected}
