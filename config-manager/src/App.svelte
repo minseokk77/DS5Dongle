@@ -723,19 +723,6 @@
 
 <main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell" class:modal-open={showInputTesterModal || showSettingsModal}>
 
-  <header class="topbar" data-tauri-drag-region>
-    <div class="brand" data-tauri-drag-region>
-      <div class="brand-icon">
-        <img src={appIcon} alt="" />
-      </div>
-      <h1 data-tauri-drag-region>DS5 Dongle Config</h1>
-    </div>
-    <div class="window-controls compact">
-      <button type="button" aria-label="최소화" title="최소화" onclick={minimizeWindow}>−</button>
-      <button class="close" type="button" aria-label="닫기" title="닫기" onclick={closeWindow}>×</button>
-    </div>
-  </header>
-
   {#if toastText}
     <div class:error={toastKind === 'error'} class="toast" role="status">
       <span>{toastText}</span>
