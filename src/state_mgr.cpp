@@ -2,215 +2,215 @@
 // Created by awalol on 2026/5/15.
 //
 
-#include <cstddef>
+#include "state_mgr.h"
+
 #include <cstring>
 
+#include "config.h"
 #include "utils.h"
 
-namespace {
-    constexpr size_t kAudioControlOffset = offsetof(SetStateData, MuteLightMode) - sizeof(uint8_t);
-    constexpr size_t kMuteControlOffset = offsetof(SetStateData, RightTriggerFFB) - sizeof(uint8_t);
-    constexpr size_t kMotorPowerLevelOffset = offsetof(SetStateData, HostTimestamp) + sizeof(uint32_t);
-    constexpr size_t kAudioControl2Offset = kMotorPowerLevelOffset + sizeof(uint8_t);
-    constexpr size_t kHapticLowPassFilterOffset = offsetof(SetStateData, LightFadeAnimation) - 2 * sizeof(uint8_t);
-    constexpr size_t kPlayerIndicatorsOffset = offsetof(SetStateData, LedRed) - sizeof(uint8_t);
+static constexpr SetStateData state_init_data = {
+    // 0xfd
+    .EnableRumbleEmulation = 1,
+    .UseRumbleNotHaptics = 0,
+    .AllowRightTriggerFFB = 1,
+    .AllowLeftTriggerFFB = 1,
+    .AllowHeadphoneVolume = 1,
+    .AllowSpeakerVolume = 1,
+    .AllowMicVolume = 1,
+    .AllowAudioControl = 1,
+    // 0xf7
+    .AllowMuteLight = 1,
+    .AllowAudioMute = 1,
+    .AllowLedColor = 1,
+    .ResetLights = 0,
+    .AllowPlayerIndicators = 1,
+    .AllowHapticLowPassFilter = 1,
+    .AllowMotorPowerLevel = 1,
+    .AllowAudioControl2 = 1,
 
-    struct LightStateBackup {
-        uint8_t flags1;
-        uint8_t flags38;
-        uint8_t fade;
-        uint8_t brightness;
-        uint8_t red;
-        uint8_t green;
-        uint8_t blue;
-    };
+    .VolumeMic = 0xff,
 
-    LightStateBackup low_battery_backup{};
-    bool low_battery_backup_valid = false;
-}
+    // AudioControl 0x09
+    .MicSelect = 1, // Internal Only
+    .NoiseCancelEnable = 1,
 
-static constexpr uint8_t state_init_data[63] = {
-    0xfd, 0xf7, 0x0, 0x0,
-    0x7f, 0x64, // Headphones, Speaker
-    0xff, 0x9, 0x0, 0x0F, 0x0, 0x0, 0x0, 0x0,
-    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xa,
-    0x7, 0x0, 0x0, 0x2, 0x1,
-    0x00,
-    0xff, 0xd7, 0x00 // RGB LED: R, G, B (Nijika Color!)✨
+    // MuteControl 0x0f
+    .TouchPowerSave = 1,
+    .MotionPowerSave = 1,
+    .HapticPowerSave = 1,
+    .AudioPowerSave = 1,
+
+    // MotorPowerLevel
+    // .TriggerMotorPowerReduction = 7,
+
+    // AudioControl2
+    .SpeakerCompPreGain = 1,
+    .BeamformingEnable = 0,
+
+    .AllowLightBrightnessChange = 1,
+    .AllowColorLightFadeAnimation = 1,
+    .EnableImprovedRumbleEmulation = 1,
+
+    .LightFadeAnimation = LightFadeAnimation::FadeOut,
+    .LightBrightness = LightBrightness::Mid,
+
+    // RGB LED: R, G, B (Nijika Color!)✨
+    .LedRed = 0xff,
+    .LedGreen = 0xd7,
+    .LedBlue = 0x00,
 };
 
-uint8_t state[63]{};
-
-static void set_bit(uint8_t &byte, const int bit, const bool value) {
-    byte = (byte & ~(1 << bit)) | (value << bit);
-}
+SetStateData state{};
 
 void state_init() {
-    memcpy(state, state_init_data, sizeof(state));
+    state = state_init_data;
+    state.VolumeSpeaker = get_config().speaker_volume;
+    state.VolumeHeadphones = get_config().headset_volume;
+    set_volume(get_config().speaker_volume, get_config().headset_volume);
+    if (get_config().speaker_gain != 0) {
+        set_gain(get_config().speaker_gain);
+    }
+    if (get_config().trigger_reduce != 0) {
+        state.TriggerMotorPowerReduction = get_config().trigger_reduce;
+    }
 }
 
 void state_set(uint8_t *data, const uint8_t size) {
     if (size > 63) {
         printf("[StateMgr] Warning: State Set over 63 bytes\n");
     }
-    memcpy(data, state, size);
+    memcpy(data, &state, size);
 }
 
 void state_update(const uint8_t *data, const uint8_t size) {
-    if (size < sizeof(SetStateData)) {
+    if (size < 47) {
         printf(
-            "[StateMgr] Error: SetStateData at least %u bytes\n",
-            static_cast<unsigned>(sizeof(SetStateData))
+            "[StateMgr] Error: SetStateData needs %u bytes, got %u\n",
+            static_cast<unsigned>(sizeof(SetStateData)),
+            size
         );
         return;
     }
 
     SetStateData update{};
-    memcpy(&update, data, sizeof(update));
+    memcpy(&update, data, sizeof(SetStateData));
 
-    const auto copy_if_allowed = [&](const bool allowed, const size_t offset, const size_t length) {
-        if (allowed) {
-            memcpy(state + offset, data + offset, length);
-        }
-    };
-    set_bit(state[0], 0, update.EnableRumbleEmulation);
-    set_bit(state[0], 1, update.UseRumbleNotHaptics);
-    set_bit(state[38], 2, update.EnableImprovedRumbleEmulation);
-    copy_if_allowed(
-        update.UseRumbleNotHaptics || update.EnableRumbleEmulation,
-        offsetof(SetStateData, RumbleEmulationRight),
-        2
-    );
-
-    /*copy_if_allowed(
-        update.AllowHeadphoneVolume,
-        offsetof(SetStateData, VolumeHeadphones),
-        sizeof(update.VolumeHeadphones)
-    );*/
-    /*copy_if_allowed(
-        update.AllowSpeakerVolume,
-        offsetof(SetStateData, VolumeSpeaker),
-        sizeof(update.VolumeSpeaker)
-    );*/
-    copy_if_allowed(
-        update.AllowMicVolume,
-        offsetof(SetStateData, VolumeMic),
-        sizeof(update.VolumeMic)
-    );
-    copy_if_allowed(
-        update.AllowAudioControl,
-        kAudioControlOffset,
-        sizeof(uint8_t)
-    );
-
-    copy_if_allowed(
-        update.AllowMuteLight,
-        offsetof(SetStateData, MuteLightMode),
-        sizeof(update.MuteLightMode)
-    );
-
-    copy_if_allowed(
-        update.AllowAudioMute,
-        kMuteControlOffset,
-        sizeof(uint8_t)
-    );
-
-    copy_if_allowed(
-        update.AllowRightTriggerFFB,
-        offsetof(SetStateData, RightTriggerFFB),
-        sizeof(update.RightTriggerFFB)
-    );
-    copy_if_allowed(
-        update.AllowLeftTriggerFFB,
-        offsetof(SetStateData, LeftTriggerFFB),
-        sizeof(update.LeftTriggerFFB)
-    );
-
-    /*copy_if_allowed(
-        update.AllowMotorPowerLevel,
-        kMotorPowerLevelOffset,
-        sizeof(uint8_t)
-    );*/
-    /*copy_if_allowed(
-        update.AllowAudioControl2,
-        kAudioControl2Offset,
-        sizeof(uint8_t)
-    );*/
-    /*copy_if_allowed(
-        update.AllowHapticLowPassFilter,
-        kHapticLowPassFilterOffset,
-        sizeof(uint8_t)
-    );*/
-
-    copy_if_allowed(
-        update.AllowColorLightFadeAnimation,
-        offsetof(SetStateData, LightFadeAnimation),
-        sizeof(update.LightFadeAnimation)
-    );
-    copy_if_allowed(
-        update.AllowLightBrightnessChange,
-        offsetof(SetStateData, LightBrightness),
-        sizeof(update.LightBrightness)
-    );
-    copy_if_allowed(
-        update.AllowPlayerIndicators,
-        kPlayerIndicatorsOffset,
-        sizeof(uint8_t)
-    );
-    copy_if_allowed(
-        update.AllowLedColor,
-        offsetof(SetStateData, LedRed),
-        sizeof(update.LedRed) * 3
-    );
-}
-
-void state_set_mic_muted(const bool muted) {
-    set_bit(state[1], 0, true); // AllowMuteLight
-    set_bit(state[1], 1, true); // AllowAudioMute
-    state[8] = muted ? MuteLight::On : MuteLight::Off;
-    set_bit(state[9], 4, muted); // MicMute
-}
-
-bool state_get_mic_muted() {
-    return (state[9] & (1 << 4)) != 0;
-}
-
-void state_set_low_battery_warning(const bool active, const bool light_on) {
-    if (!active) {
-        if (low_battery_backup_valid) {
-            state[1] = low_battery_backup.flags1;
-            state[38] = low_battery_backup.flags38;
-            state[41] = low_battery_backup.fade;
-            state[42] = low_battery_backup.brightness;
-            state[44] = low_battery_backup.red;
-            state[45] = low_battery_backup.green;
-            state[46] = low_battery_backup.blue;
-            low_battery_backup_valid = false;
-        }
-        return;
+    state.EnableRumbleEmulation = update.EnableRumbleEmulation;
+    state.UseRumbleNotHaptics = update.UseRumbleNotHaptics;
+    state.EnableImprovedRumbleEmulation = update.EnableImprovedRumbleEmulation;
+    state.UseRumbleNotHaptics2 = update.UseRumbleNotHaptics2;
+    if (state.UseRumbleNotHaptics || state.UseRumbleNotHaptics2) {
+        state.RumbleEmulationLeft = update.RumbleEmulationLeft;
+        state.RumbleEmulationRight = update.RumbleEmulationRight;
+    }else {
+        state.RumbleEmulationLeft = state.RumbleEmulationRight = 0;
     }
 
-    if (!low_battery_backup_valid) {
-        low_battery_backup = {
-            state[1],
-            state[38],
-            state[41],
-            state[42],
-            state[44],
-            state[45],
-            state[46],
-        };
-        low_battery_backup_valid = true;
+    if (update.AllowHeadphoneVolume) {
+        get_config().headset_volume = update.VolumeHeadphones;
+        state.VolumeHeadphones = update.VolumeHeadphones;
+    }
+    if (update.AllowSpeakerVolume) {
+        get_config().speaker_volume = update.VolumeSpeaker;
+        state.VolumeSpeaker = update.VolumeSpeaker;
+    }
+    if (update.AllowMicVolume) {
+        state.VolumeMic = update.VolumeMic;
     }
 
-    set_bit(state[1], 2, true);   // AllowLedColor
-    set_bit(state[38], 0, true);  // AllowLightBrightnessChange
-    set_bit(state[38], 1, true);  // AllowColorLightFadeAnimation
-    state[41] = LightFadeAnimation::Nothing;
-    state[42] = LightBrightness::Bright;
-    state[44] = light_on ? 0xff : 0x00;
-    state[45] = 0x00;
-    state[46] = 0x00;
+    if (update.AllowAudioControl) {
+        state.MicSelect = update.MicSelect;
+        state.EchoCancelEnable = update.EchoCancelEnable;
+        state.NoiseCancelEnable = update.NoiseCancelEnable;
+        state.OutputPathSelect = update.OutputPathSelect;
+        state.InputPathSelect = update.InputPathSelect;
+    }
+
+    if (update.AllowMuteLight) {
+        state.MuteLightMode = update.MuteLightMode;
+    }
+
+    if (update.AllowAudioMute) {
+        state.TouchPowerSave = update.TouchPowerSave;
+        state.MotionPowerSave = update.MotionPowerSave;
+        state.HapticPowerSave = update.HapticPowerSave;
+        state.AudioPowerSave = update.AudioPowerSave;
+        state.MicMute = update.MicMute;
+        state.SpeakerMute = update.SpeakerMute;
+        state.HeadphoneMute = update.HeadphoneMute;
+        state.HapticMute = update.HapticMute;
+    }
+
+    if (update.AllowRightTriggerFFB) {
+        memcpy(state.RightTriggerFFB, update.RightTriggerFFB, sizeof(state.RightTriggerFFB));
+    }
+    if (update.AllowLeftTriggerFFB) {
+        memcpy(state.LeftTriggerFFB, update.LeftTriggerFFB, sizeof(state.LeftTriggerFFB));
+    }
+
+    if (update.AllowMotorPowerLevel) {
+        state.RumbleMotorPowerReduction = update.RumbleMotorPowerReduction;
+        if (get_config().trigger_reduce == 0) {
+            state.TriggerMotorPowerReduction = update.TriggerMotorPowerReduction;
+        }
+    }
+
+    if (update.AllowAudioControl2) {
+        if (get_config().speaker_gain == 0) {
+            state.SpeakerCompPreGain = update.SpeakerCompPreGain;
+        }
+        state.BeamformingEnable = update.BeamformingEnable;
+        state.UnkAudioControl2 = update.UnkAudioControl2;
+    }
+
+    if (update.AllowHapticLowPassFilter) {
+        state.HapticLowPassFilter = update.HapticLowPassFilter;
+        state.UNKBIT = update.UNKBIT;
+    }
+
+    if (update.AllowColorLightFadeAnimation) {
+        state.LightFadeAnimation = update.LightFadeAnimation;
+    }
+    if (update.AllowLightBrightnessChange) {
+        state.LightBrightness = update.LightBrightness;
+    }
+
+    if (update.AllowPlayerIndicators) {
+        state.PlayerLight1 = update.PlayerLight1;
+        state.PlayerLight2 = update.PlayerLight2;
+        state.PlayerLight3 = update.PlayerLight3;
+        state.PlayerLight4 = update.PlayerLight4;
+        state.PlayerLight5 = update.PlayerLight5;
+        state.PlayerLightFade = update.PlayerLightFade;
+        state.PlayerLightUNK = update.PlayerLightUNK;
+    }
+
+    if (update.AllowLedColor) {
+        state.LedRed = update.LedRed;
+        state.LedGreen = update.LedGreen;
+        state.LedBlue = update.LedBlue;
+    }
+}
+
+// for usbaudio SET_CUR cmd
+void set_volume(const uint8_t value) {
+    // printf("[StateMgr] SetVolume: %u\n",value);
+    state.VolumeSpeaker = value;
+    state.VolumeHeadphones = value;
+    get_config().speaker_volume = value;
+    get_config().headset_volume = value;
+}
+
+void set_volume(const uint8_t speaker, const uint8_t headset) {
+    state.VolumeSpeaker = speaker;
+    state.VolumeHeadphones = headset;
+}
+
+void set_gain(const uint8_t value) {
+    state.SpeakerCompPreGain = value;
+}
+
+void set_trigger_reduce(const uint8_t value) {
+    state.TriggerMotorPowerReduction = value;
 }

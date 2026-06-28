@@ -2,47 +2,16 @@
 // Created by awalol on 2026/3/4.
 //
 
+#include <algorithm>
+
+#include "bt.h"
 #include "tusb.h"
 #include "bsp/board_api.h"
 #include "config.h"
 #include "state_mgr.h"
-#include "pico/time.h"
-#include "usb.h"
 
 uint8_t mute[2]; // 0: SPEAKER(0x02) 1: MIC(0x05)
-float volume[2] = {0.0f,0.0f}; // 0: Windows speaker volume, 1: mic volume
-static UsbPresentationMode presentation_mode = USB_PRESENTATION_CONFIG_ONLY;
-static absolute_time_t last_presentation_switch_time = nil_time;
-
-UsbPresentationMode usb_get_presentation_mode() {
-    return presentation_mode;
-}
-
-void usb_set_presentation_mode(UsbPresentationMode mode, bool reconnect) {
-    if (presentation_mode == mode && !reconnect) {
-        return;
-    }
-
-    if (presentation_mode != mode && !is_nil_time(last_presentation_switch_time) &&
-        absolute_time_diff_us(last_presentation_switch_time, get_absolute_time()) < 800 * 1000) {
-        printf("[USB] Presentation switch debounced: %u -> %u\n", presentation_mode, mode);
-        return;
-    }
-
-    if (reconnect) {
-        tud_disconnect();
-        sleep_ms(150);
-    }
-
-    if (presentation_mode != mode) {
-        last_presentation_switch_time = get_absolute_time();
-    }
-    presentation_mode = mode;
-
-    if (reconnect) {
-        tud_connect();
-    }
-}
+float volume[2] = {-100.0f,0.0f}; // 0: SPEAKER(0x02) 1: MIC(0x05)
 
 #define UAC1_ENTITY_SPK_FEATURE_UNIT    0x02
 #define UAC1_ENTITY_MIC_FEATURE_UNIT    0x05
@@ -87,9 +56,6 @@ static bool audio10_set_req_entity(tusb_control_request_t const *p_request, uint
                         TU_VERIFY(p_request->wLength == 1);
 
                         mute[index] = pBuff[0];
-                        if (entityID == UAC1_ENTITY_MIC_FEATURE_UNIT) {
-                            state_set_mic_muted(mute[index] != 0);
-                        }
 
                         TU_LOG2("    Set Mute: %d of entity: %u\r\n", mute[index], entityID);
                         return true;
@@ -105,6 +71,9 @@ static bool audio10_set_req_entity(tusb_control_request_t const *p_request, uint
                         TU_VERIFY(p_request->wLength == 2);
 
                         volume[index] = static_cast<float>(*reinterpret_cast<int16_t const *>(pBuff)) / 256;
+                        if (entityID == UAC1_ENTITY_SPK_FEATURE_UNIT) {
+                            set_volume(100 + volume[index]); // volume[index]: [-100,0]
+                        }
 
                         TU_LOG2("    Set Volume: %d dB of entity: %u\r\n", volume[index], entityID);
                         return true;
@@ -142,6 +111,9 @@ static bool audio10_get_req_entity(uint8_t rhport, tusb_control_request_t const 
                 switch (p_request->bRequest) {
                     case AUDIO10_CS_REQ_GET_CUR:
                         TU_LOG2("    Get Volume of entity: %u\r\n", entityID); {
+                            if (entityID == UAC1_ENTITY_SPK_FEATURE_UNIT) {
+                                volume[index] = -std::min(static_cast<int>(get_config().speaker_volume),100);
+                            }
                             int16_t vol = volume[index] * 256; // convert to 1/256 dB units
                             return tud_audio_buffer_and_schedule_control_xfer(rhport, p_request, &vol, sizeof(vol));
                         }
@@ -219,3 +191,13 @@ void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_
     (void) instance;
     (void) len;
 }
+
+#ifndef ENABLE_WAKE_HID
+
+void tud_suspend_cb(bool remote_wakeup_en) {
+    printf("[USB PM] invoke tud_suspend_cb\n");
+    if (!get_config().enable_wake) return;   // wake off: leave the controller's BT alone on a USB suspend (see wake.cpp)
+    bt_power_off_controller();
+}
+
+#endif

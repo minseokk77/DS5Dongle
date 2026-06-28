@@ -6,15 +6,11 @@
 
 #include <cstdint>
 
-#include "bt.h"
 #include "config.h"
 #include "pico/cyw43_arch.h"
 #include "pico/time.h"
-#include "state_mgr.h"
-#include "utils.h"
 
 extern uint8_t interrupt_in_data[63];
-extern int reportSeqCounter;
 
 namespace {
 
@@ -27,22 +23,6 @@ uint64_t last_report_us = 0;
 uint64_t last_toggle_us = 0;
 bool     blinking       = false;
 bool     led_state      = false;
-
-void send_dualsense_state_report(void) {
-    if (!bt_is_controller_connected()) {
-        return;
-    }
-
-    uint8_t output_data[78]{};
-    output_data[0] = 0x31;
-    output_data[1] = reportSeqCounter << 4;
-    if (++reportSeqCounter == 256) {
-        reportSeqCounter = 0;
-    }
-    output_data[2] = 0x10;
-    state_set(output_data + 3, sizeof(SetStateData));
-    bt_write(output_data, sizeof(output_data));
-}
 
 }  // namespace
 
@@ -57,45 +37,27 @@ void battery_led_note_report(void) {
     last_report_us = time_us_64();
 }
 
-bool battery_led_get_status(uint8_t *level_percent, uint8_t *power_state, uint8_t *raw_value) {
-    const uint64_t now = time_us_64();
-    if (last_report_us == 0 || (now - last_report_us) >= REPORT_STALE_US) {
-        return false;
-    }
-
-    const uint8_t raw = interrupt_in_data[52];
-    const uint8_t pct = raw & 0x0F;
-    const uint8_t st = (raw >> 4) & 0x0F;
-
-    if (level_percent) {
-        *level_percent = pct >= 10 ? 100 : pct * 10;
-    }
-    if (power_state) {
-        *power_state = st;
-    }
-    if (raw_value) {
-        *raw_value = raw;
-    }
-    return true;
-}
-
 void battery_led_on_disconnect(void) {
+    // Stop any in-progress blink and force the LED off immediately. Zero
+    // last_report_us so the tick's stale-check early-returns until a fresh
+    // 0x31 report arrives on the next connection — prevents the cached
+    // low-battery byte from re-arming a blink during reconnect retries.
     blinking = false;
     led_state = false;
     last_report_us = 0;
     last_toggle_us = 0;
-    state_set_low_battery_warning(false, false);
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
 }
 
 void battery_led_tick(void) {
     const uint64_t now = time_us_64();
     if (last_report_us == 0 || (now - last_report_us) >= REPORT_STALE_US) {
-        // No fresh data: force off if a blink was active, then wait for a fresh report.
+        // No fresh data — bt.cpp owns the LED while disconnected. If we
+        // were mid-blink when the report went stale, force the LED off
+        // so it doesn't freeze in whichever half-cycle it was in.
         if (blinking) {
             blinking = false;
             led_state = false;
-            state_set_low_battery_warning(false, false);
             cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
         }
         return;
@@ -107,26 +69,23 @@ void battery_led_tick(void) {
     const bool low    = (st == POWER_STATE_DISCHARGING) && (pct <= THRESHOLD_LEVEL);
 
     if (low) {
+        // Critical warning: override disable_pico_led so the user always sees it.
         if (!blinking) {
             blinking = true;
             led_state = true;
             last_toggle_us = now;
-            state_set_low_battery_warning(true, true);
-            send_dualsense_state_report();
-            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, !get_config().disable_pico_led);
+            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, true);
             return;
         }
         if ((now - last_toggle_us) >= BLINK_PERIOD_US) {
             led_state = !led_state;
             last_toggle_us = now;
-            state_set_low_battery_warning(true, led_state);
-            send_dualsense_state_report();
+            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, led_state);
         }
     } else if (blinking) {
         blinking = false;
-        state_set_low_battery_warning(false, false);
-        send_dualsense_state_report();
-        // Battery recovered or now charging — restore Pico steady-state LED per preference.
+        // Battery recovered or now charging — restore steady-state LED per the user
+        // preference flag (LED off when disabled, otherwise the bt.cpp connected = on state).
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, !get_config().disable_pico_led);
     }
 }

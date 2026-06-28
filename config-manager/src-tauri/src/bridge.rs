@@ -18,13 +18,29 @@ pub struct BridgeDevice {
 pub struct BridgeConfig {
     pub config_version: u8,
     pub haptics_gain: f32,
-    pub speaker_volume_percent: f32,
+    #[serde(alias = "speaker_volume_percent", default = "default_volume")]
+    pub speaker_volume: u8,
+    #[serde(default = "default_volume")]
+    pub headset_volume: u8,
+    #[serde(default)]
+    pub speaker_gain: u8,
     pub inactive_time: u8,
-    pub disable_inactive_disconnect: bool,
     pub disable_pico_led: bool,
     pub polling_rate_mode: u8,
     pub audio_buffer_length: u8,
     pub controller_mode: u8,
+    #[serde(default)]
+    pub enable_usb_sn: bool,
+    #[serde(default)]
+    pub ps_shortcut_enabled: bool,
+    #[serde(default)]
+    pub disable_mic: bool,
+    #[serde(default)]
+    pub disable_speaker: bool,
+    #[serde(default)]
+    pub enable_wake: bool,
+    #[serde(default)]
+    pub trigger_reduce: u8,
     #[serde(default)]
     pub stick_calibration_enabled: bool,
     #[serde(default)]
@@ -425,40 +441,45 @@ fn write_adaptive_trigger_output(
 }
 
 fn decode_config(bytes: &[u8], settings: &AppSettings) -> Result<BridgeConfig, BridgeError> {
-    if bytes.len() < 30 {
+    if bytes.len() < 34 {
         return Err(BridgeError::InvalidConfig(format!(
-            "설정 데이터 길이가 부족합니다. 실제 {}바이트, 최소 30바이트입니다.",
+            "설정 데이터 길이가 부족합니다. 실제 {}바이트, 최소 34바이트입니다.",
             bytes.len()
         )));
     }
 
-    let speaker_volume_db = f32::from_le_bytes(bytes[5..9].try_into().unwrap());
-
     let mut config = BridgeConfig {
         config_version: bytes[0],
         haptics_gain: f32::from_le_bytes(bytes[1..5].try_into().unwrap()),
-        speaker_volume_percent: db_to_volume_percent(speaker_volume_db).round(),
-        inactive_time: bytes[9],
-        disable_inactive_disconnect: bytes[10] != 0,
-        disable_pico_led: bytes[11] != 0,
-        polling_rate_mode: bytes[12],
-        audio_buffer_length: bytes[13],
-        controller_mode: bytes[14],
-        stick_calibration_enabled: bytes.get(15).copied().unwrap_or(0) != 0,
-        left_stick_center_x: read_i8_scaled(bytes, 16, 127.0).unwrap_or(0.0),
-        left_stick_center_y: read_i8_scaled(bytes, 17, 127.0).unwrap_or(0.0),
-        left_stick_deadzone: bytes.get(18).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
-        right_stick_center_x: read_i8_scaled(bytes, 19, 127.0).unwrap_or(0.0),
-        right_stick_center_y: read_i8_scaled(bytes, 20, 127.0).unwrap_or(0.0),
-        right_stick_deadzone: bytes.get(21).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
-        left_stick_min_x: read_i8_scaled(bytes, 22, 127.0).unwrap_or(-1.0),
-        left_stick_max_x: read_i8_scaled(bytes, 23, 127.0).unwrap_or(1.0),
-        left_stick_min_y: read_i8_scaled(bytes, 24, 127.0).unwrap_or(-1.0),
-        left_stick_max_y: read_i8_scaled(bytes, 25, 127.0).unwrap_or(1.0),
-        right_stick_min_x: read_i8_scaled(bytes, 26, 127.0).unwrap_or(-1.0),
-        right_stick_max_x: read_i8_scaled(bytes, 27, 127.0).unwrap_or(1.0),
-        right_stick_min_y: read_i8_scaled(bytes, 28, 127.0).unwrap_or(-1.0),
-        right_stick_max_y: read_i8_scaled(bytes, 29, 127.0).unwrap_or(1.0),
+        speaker_volume: bytes[5],
+        headset_volume: bytes[6],
+        speaker_gain: bytes[7],
+        inactive_time: bytes[8],
+        disable_pico_led: bytes[9] != 0,
+        polling_rate_mode: bytes[10],
+        audio_buffer_length: bytes[11],
+        controller_mode: bytes[12],
+        enable_usb_sn: bytes[13] != 0,
+        ps_shortcut_enabled: bytes[14] != 0,
+        disable_mic: bytes[15] != 0,
+        disable_speaker: bytes[16] != 0,
+        enable_wake: bytes[17] != 0,
+        trigger_reduce: bytes[18],
+        stick_calibration_enabled: bytes.get(19).copied().unwrap_or(0) != 0,
+        left_stick_center_x: read_i8_scaled(bytes, 20, 127.0).unwrap_or(0.0),
+        left_stick_center_y: read_i8_scaled(bytes, 21, 127.0).unwrap_or(0.0),
+        left_stick_deadzone: bytes.get(22).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
+        right_stick_center_x: read_i8_scaled(bytes, 23, 127.0).unwrap_or(0.0),
+        right_stick_center_y: read_i8_scaled(bytes, 24, 127.0).unwrap_or(0.0),
+        right_stick_deadzone: bytes.get(25).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
+        left_stick_min_x: read_i8_scaled(bytes, 26, 127.0).unwrap_or(-1.0),
+        left_stick_max_x: read_i8_scaled(bytes, 27, 127.0).unwrap_or(1.0),
+        left_stick_min_y: read_i8_scaled(bytes, 28, 127.0).unwrap_or(-1.0),
+        left_stick_max_y: read_i8_scaled(bytes, 29, 127.0).unwrap_or(1.0),
+        right_stick_min_x: read_i8_scaled(bytes, 30, 127.0).unwrap_or(-1.0),
+        right_stick_max_x: read_i8_scaled(bytes, 31, 127.0).unwrap_or(1.0),
+        right_stick_min_y: read_i8_scaled(bytes, 32, 127.0).unwrap_or(-1.0),
+        right_stick_max_y: read_i8_scaled(bytes, 33, 127.0).unwrap_or(1.0),
     };
 
     let rules = &settings.config;
@@ -473,31 +494,38 @@ fn decode_config(bytes: &[u8], settings: &AppSettings) -> Result<BridgeConfig, B
 }
 
 fn encode_config(config: &BridgeConfig) -> Vec<u8> {
-    let mut out = vec![0_u8; settings().config.body_length.max(30)];
+    let mut out = vec![0_u8; settings().config.body_length.max(34)];
     out[0] = settings().config.version;
     out[1..5].copy_from_slice(&config.haptics_gain.to_le_bytes());
-    out[5..9].copy_from_slice(&volume_percent_to_db(config.speaker_volume_percent).to_le_bytes());
-    out[9] = config.inactive_time;
-    out[10] = u8::from(config.disable_inactive_disconnect);
-    out[11] = u8::from(config.disable_pico_led);
-    out[12] = config.polling_rate_mode;
-    out[13] = config.audio_buffer_length;
-    out[14] = config.controller_mode;
-    out[15] = u8::from(config.stick_calibration_enabled);
-    write_i8_scaled(&mut out, 16, config.left_stick_center_x, 127.0);
-    write_i8_scaled(&mut out, 17, config.left_stick_center_y, 127.0);
-    out[18] = (config.left_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
-    write_i8_scaled(&mut out, 19, config.right_stick_center_x, 127.0);
-    write_i8_scaled(&mut out, 20, config.right_stick_center_y, 127.0);
-    out[21] = (config.right_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
-    write_i8_scaled(&mut out, 22, config.left_stick_min_x, 127.0);
-    write_i8_scaled(&mut out, 23, config.left_stick_max_x, 127.0);
-    write_i8_scaled(&mut out, 24, config.left_stick_min_y, 127.0);
-    write_i8_scaled(&mut out, 25, config.left_stick_max_y, 127.0);
-    write_i8_scaled(&mut out, 26, config.right_stick_min_x, 127.0);
-    write_i8_scaled(&mut out, 27, config.right_stick_max_x, 127.0);
-    write_i8_scaled(&mut out, 28, config.right_stick_min_y, 127.0);
-    write_i8_scaled(&mut out, 29, config.right_stick_max_y, 127.0);
+    out[5] = config.speaker_volume;
+    out[6] = config.headset_volume;
+    out[7] = config.speaker_gain;
+    out[8] = config.inactive_time;
+    out[9] = u8::from(config.disable_pico_led);
+    out[10] = config.polling_rate_mode;
+    out[11] = config.audio_buffer_length;
+    out[12] = config.controller_mode;
+    out[13] = u8::from(config.enable_usb_sn);
+    out[14] = u8::from(config.ps_shortcut_enabled);
+    out[15] = u8::from(config.disable_mic);
+    out[16] = u8::from(config.disable_speaker);
+    out[17] = u8::from(config.enable_wake);
+    out[18] = config.trigger_reduce;
+    out[19] = u8::from(config.stick_calibration_enabled);
+    write_i8_scaled(&mut out, 20, config.left_stick_center_x, 127.0);
+    write_i8_scaled(&mut out, 21, config.left_stick_center_y, 127.0);
+    out[22] = (config.left_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
+    write_i8_scaled(&mut out, 23, config.right_stick_center_x, 127.0);
+    write_i8_scaled(&mut out, 24, config.right_stick_center_y, 127.0);
+    out[25] = (config.right_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
+    write_i8_scaled(&mut out, 26, config.left_stick_min_x, 127.0);
+    write_i8_scaled(&mut out, 27, config.left_stick_max_x, 127.0);
+    write_i8_scaled(&mut out, 28, config.left_stick_min_y, 127.0);
+    write_i8_scaled(&mut out, 29, config.left_stick_max_y, 127.0);
+    write_i8_scaled(&mut out, 30, config.right_stick_min_x, 127.0);
+    write_i8_scaled(&mut out, 31, config.right_stick_max_x, 127.0);
+    write_i8_scaled(&mut out, 32, config.right_stick_min_y, 127.0);
+    write_i8_scaled(&mut out, 33, config.right_stick_max_y, 127.0);
 
     out
 }
@@ -598,14 +626,6 @@ fn read_battery(device: &HidDevice, report_id: u8) -> (Option<u8>, Option<bool>)
         }
     }
     (None, None)
-}
-
-fn db_to_volume_percent(db: f32) -> f32 {
-    (db + 100.0).clamp(0.0, 100.0)
-}
-
-fn volume_percent_to_db(percent: f32) -> f32 {
-    (percent - 100.0).clamp(-100.0, 0.0)
 }
 
 fn read_i8_scaled(bytes: &[u8], offset: usize, scale: f32) -> Option<f32> {

@@ -14,13 +14,20 @@ export interface BridgeDevice {
 export interface BridgeConfig {
   config_version: number;
   haptics_gain: number;
-  speaker_volume_percent: number;
+  speaker_volume: number;
+  headset_volume: number;
+  speaker_gain: number;
   inactive_time: number;
-  disable_inactive_disconnect: boolean;
   disable_pico_led: boolean;
-  polling_rate_mode: PollingRateMode;
+  polling_rate_mode: number;
   audio_buffer_length: number;
-  controller_mode: ControllerMode;
+  controller_mode: number;
+  enable_usb_sn: boolean;
+  ps_shortcut_enabled: boolean;
+  disable_mic: boolean;
+  disable_speaker: boolean;
+  enable_wake: boolean;
+  trigger_reduce: number;
   stick_calibration_enabled: boolean;
   left_stick_center_x: number;
   left_stick_center_y: number;
@@ -41,13 +48,20 @@ export interface BridgeConfig {
 export const defaultConfig: BridgeConfig = {
   config_version: 1,
   haptics_gain: 1.0,
-  speaker_volume_percent: 50,
-  inactive_time: 10,
-  disable_inactive_disconnect: false,
+  speaker_volume: 100,
+  headset_volume: 100,
+  speaker_gain: 2,
+  inactive_time: 30,
   disable_pico_led: false,
-  polling_rate_mode: 2,
+  polling_rate_mode: 1,
   audio_buffer_length: 64,
-  controller_mode: 0,
+  controller_mode: 2,
+  enable_usb_sn: false,
+  ps_shortcut_enabled: false,
+  disable_mic: false,
+  disable_speaker: false,
+  enable_wake: false,
+  trigger_reduce: 0,
   stick_calibration_enabled: false,
   left_stick_center_x: 0.0,
   left_stick_center_y: 0,

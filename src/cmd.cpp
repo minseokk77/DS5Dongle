@@ -9,44 +9,22 @@
 #include <cstring>
 
 #include "bt.h"
-#include "battery_led.h"
 #include "config.h"
 #include "device/usbd.h"
-#include "pico/bootrom.h"
 #include "pico/time.h"
-#include "usb.h"
+#include "audio.h"
+#include "wake.h"
 
-constexpr uint8_t CAPABILITY_PROTOCOL_VERSION = 1;
-constexpr uint32_t FEATURE_BATTERY = 1u << 0;
-constexpr uint32_t FEATURE_RSSI = 1u << 1;
-constexpr uint32_t FEATURE_VIBRATION_TEST = 1u << 2;
-constexpr uint32_t FEATURE_ADAPTIVE_TRIGGER = 1u << 3;
-constexpr uint32_t FEATURE_BOOTLOADER_COMMAND = 1u << 4;
-constexpr uint32_t FEATURE_STICK_CALIBRATION = 1u << 5;
-constexpr uint32_t FEATURE_DIRECTIONAL_STICK_CALIBRATION = 1u << 6;
-constexpr uint32_t FEATURE_FLAGS =
-    FEATURE_BATTERY |
-    FEATURE_RSSI |
-    FEATURE_VIBRATION_TEST |
-    FEATURE_ADAPTIVE_TRIGGER |
-    FEATURE_BOOTLOADER_COMMAND |
-    FEATURE_STICK_CALIBRATION |
-    FEATURE_DIRECTIONAL_STICK_CALIBRATION;
-
-constexpr const char *BUILD_CHANNEL =
-#if ENABLE_VERBOSE
-    "debug";
-#else
-    "release";
-#endif
+// spk_active (main.cpp) + audio_mic_active() (audio.cpp) are surfaced in the
+// 0xf9 feature report so the config UI can display the real gated mic/speaker
+// state, reflecting the disable_mic / disable_speaker settings.
+extern bool spk_active;
 
 bool is_pico_cmd(uint8_t report_id) {
     if (report_id == 0xf6 ||
         report_id == 0xf7 ||
-        report_id == 0xf5 ||
         report_id == 0xf8 ||
-        report_id == 0xf9 ||
-        report_id == 0xfa
+        report_id == 0xf9
     ) {
         return true;
     }
@@ -69,28 +47,6 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
         memcpy(buffer, PICO_PROGRAM_VERSION_STRING, len);
         return len;
     }
-    if (report_id == 0xfa) {
-        printf("[HID] Receive 0xfa getting capabilities\n");
-        static_assert(sizeof(Config_body) <= 255);
-        uint8_t capabilities[24] = {
-            'D', '5', 'C', 'P',
-            CAPABILITY_PROTOCOL_VERSION,
-            get_config().config_version,
-            static_cast<uint8_t>(sizeof(Config_body)),
-            0,
-            static_cast<uint8_t>((FEATURE_FLAGS >> 0) & 0xff),
-            static_cast<uint8_t>((FEATURE_FLAGS >> 8) & 0xff),
-            static_cast<uint8_t>((FEATURE_FLAGS >> 16) & 0xff),
-            static_cast<uint8_t>((FEATURE_FLAGS >> 24) & 0xff),
-        };
-        capabilities[12] = bt_is_controller_connected() ? 1 : 0;
-        const auto channel_len = std::min(strlen(BUILD_CHANNEL), sizeof(capabilities) - 14);
-        capabilities[13] = static_cast<uint8_t>(channel_len);
-        memcpy(capabilities + 14, BUILD_CHANNEL, channel_len);
-        const auto len = std::min(sizeof(capabilities), static_cast<size_t>(reqlen));
-        memcpy(buffer, capabilities, len);
-        return len;
-    }
     if (report_id == 0xf9) {
         // [-128,0]
         int8_t rssi = 0;
@@ -99,25 +55,21 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
             return 0;
         }
         buffer[0] = rssi;
+        // byte 1: real audio gating state, for the config UI to display.
+        //   bit7 = valid marker (firmware without this byte leaves it 0)
+        //   bit0 = controller mic actually streaming (host opened it AND !disable_mic)
+        //   bit1 = controller speaker actually driven (host opened it AND !disable_speaker)
+        if (reqlen >= 2) {
+            uint8_t flags = 0x80;
+            if (audio_mic_active() && !get_config().disable_mic) flags |= 0x01;
+            if (spk_active && !get_config().disable_speaker) flags |= 0x02;
+            buffer[1] = flags;
+            return 2;
+        }
 #if ENABLE_VERBOSE
         printf("[HID] 0xf9 RSSI=%d raw=0x%02X\n", rssi, buffer[0]);
 #endif
         return 1;
-    }
-    if (report_id == 0xf5) {
-        uint8_t level = 0;
-        uint8_t state = 0;
-        uint8_t raw = 0;
-        if (reqlen < 3 || !battery_led_get_status(&level, &state, &raw)) {
-            return 0;
-        }
-        buffer[0] = level;
-        buffer[1] = state;
-        buffer[2] = raw;
-#if ENABLE_VERBOSE
-        printf("[HID] 0xf5 battery=%u state=0x%02X raw=0x%02X\n", level, state, raw);
-#endif
-        return 3;
     }
     return 0;
 }
@@ -130,10 +82,11 @@ void pico_cmd_set(uint8_t report_id, uint8_t const *buffer, uint16_t bufsize) {
 
     // 0x01 update config in variable
     // 0x02 write config to flash
-    // 0x03 reconnect tinyusb device
-    // 0x04 reboot into USB bootloader
+    // 0x03 reconnect tinyusb device;
     if (buffer[0] == 0x01) {
+#if ENABLE_VERBOSE
         printf("[CMD] Enter config set func\n");
+#endif
         set_config(buffer + 1, bufsize - 1);
     }
     if (buffer[0] == 0x02) {
@@ -142,12 +95,9 @@ void pico_cmd_set(uint8_t report_id, uint8_t const *buffer, uint16_t bufsize) {
     }
     if (buffer[0] == 0x03) {
         printf("[CMD] Enter tud reconnect func\n");
-        usb_set_presentation_mode(usb_get_presentation_mode(), true);
-    }
-    if (buffer[0] == 0x04) {
-        printf("[CMD] Enter USB bootloader\n");
+        wake_note_usb_reconnect();   // this disconnect is intentional, not a host sleep
         tud_disconnect();
         sleep_ms(150);
-        reset_usb_boot(0, 0);
+        tud_connect();
     }
 }

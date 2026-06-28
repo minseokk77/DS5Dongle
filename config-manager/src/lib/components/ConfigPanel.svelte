@@ -212,12 +212,21 @@
     return (
       typeof candidate.config_version === 'number' &&
       typeof candidate.haptics_gain === 'number' &&
-      typeof candidate.speaker_volume_percent === 'number' &&
+      typeof candidate.speaker_volume === 'number' &&
+      typeof candidate.headset_volume === 'number' &&
+      typeof candidate.speaker_gain === 'number' &&
       typeof candidate.inactive_time === 'number' &&
       typeof candidate.disable_pico_led === 'boolean' &&
       typeof candidate.polling_rate_mode === 'number' &&
       typeof candidate.audio_buffer_length === 'number' &&
-      typeof candidate.controller_mode === 'number'
+      typeof candidate.controller_mode === 'number' &&
+      typeof candidate.enable_usb_sn === 'boolean' &&
+      typeof candidate.ps_shortcut_enabled === 'boolean' &&
+      typeof candidate.disable_mic === 'boolean' &&
+      typeof candidate.disable_speaker === 'boolean' &&
+      typeof candidate.enable_wake === 'boolean' &&
+      typeof candidate.trigger_reduce === 'number' &&
+      typeof candidate.stick_calibration_enabled === 'boolean'
     );
   }
 
@@ -380,8 +389,12 @@
         <input type="number" min="5" max="60" step="1" bind:value={config.inactive_time} />
       </label>
       <label class="switch-row">
-        <strong>{text.disableInactive}</strong>
-        <input type="checkbox" bind:checked={config.disable_inactive_disconnect} />
+        <strong>{text.disableSpeaker || 'Disable Speaker'}</strong>
+        <input type="checkbox" bind:checked={config.disable_speaker} />
+      </label>
+      <label class="switch-row">
+        <strong>{text.disableMic || 'Disable Mic'}</strong>
+        <input type="checkbox" bind:checked={config.disable_mic} />
       </label>
       <label class="switch-row">
         <strong>{text.enableWake}</strong>
@@ -403,8 +416,18 @@
       </div>
       <label class="control-row">
         <strong>{text.speakerVolume}</strong>
-        <input type="range" min="0" max="100" step="1" bind:value={config.speaker_volume_percent} />
-        <input type="number" min="0" max="100" step="1" bind:value={config.speaker_volume_percent} />
+        <input type="range" min="0" max="127" step="1" bind:value={config.speaker_volume} />
+        <input type="number" min="0" max="127" step="1" bind:value={config.speaker_volume} />
+      </label>
+      <label class="control-row">
+        <strong>{text.speakerGain || 'Speaker Gain'}</strong>
+        <input type="range" min="0" max="7" step="1" bind:value={config.speaker_gain} />
+        <input type="number" min="0" max="7" step="1" bind:value={config.speaker_gain} />
+      </label>
+      <label class="control-row">
+        <strong>{text.headsetVolume || 'Headset Volume'}</strong>
+        <input type="range" min="0" max="127" step="1" bind:value={config.headset_volume} />
+        <input type="number" min="0" max="127" step="1" bind:value={config.headset_volume} />
       </label>
     </section>
 
@@ -420,6 +443,11 @@
         <strong>{text.hapticsGain}</strong>
         <input type="range" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
         <input type="number" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
+      </label>
+      <label class="control-row">
+        <strong>{text.triggerReduce || 'Trigger Reduce'}</strong>
+        <input type="range" min="0" max="10" step="1" bind:value={config.trigger_reduce} />
+        <input type="number" min="0" max="10" step="1" bind:value={config.trigger_reduce} />
       </label>
       <label class="control-row">
         <strong>{text.hapticsBuffer}</strong>
@@ -449,6 +477,19 @@
         <button class:active={config.controller_mode === 1} type="button" onclick={() => (config.controller_mode = 1)}>DSE</button>
         <button class:active={config.controller_mode === 2} type="button" onclick={() => (config.controller_mode = 2)}>Auto</button>
       </div>
+
+      <label class="switch-row" style="margin-top: 12px;">
+        <strong>{text.enableUsbSn || 'Enable USB SN'}</strong>
+        <input type="checkbox" bind:checked={config.enable_usb_sn} />
+      </label>
+      <label class="switch-row" style="margin-top: 10px;">
+        <strong>{text.psShortcutEnabled || 'PS Shortcut'}</strong>
+        <input type="checkbox" bind:checked={config.ps_shortcut_enabled} />
+      </label>
+      <label class="switch-row" style="margin-top: 10px;">
+        <strong>{text.enableWake || 'Enable Wake'}</strong>
+        <input type="checkbox" bind:checked={config.enable_wake} />
+      </label>
     </section>
   </div>
 </section>
