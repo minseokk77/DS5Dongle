@@ -43,9 +43,10 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
     }
     if (report_id == 0xf8) {
         printf("[HID] Receive 0xf8 getting firmware version\n");
-        const auto len = std::min(strlen(PICO_PROGRAM_VERSION_STRING), static_cast<size_t>(reqlen));
+        memset(buffer, 0, reqlen);
+        const auto len = std::min(strlen(PICO_PROGRAM_VERSION_STRING), static_cast<size_t>(reqlen - 1));
         memcpy(buffer, PICO_PROGRAM_VERSION_STRING, len);
-        return len;
+        return reqlen;
     }
     if (report_id == 0xf9) {
         // [-128,0]

@@ -592,13 +592,13 @@ fn read_feature_string(device: &HidDevice, report_id: u8) -> Result<Option<Strin
 
     // Find the first null byte, or use the entire slice if no null byte is found
     let payload = &buffer[1..len];
-    let null_pos = payload.iter().position(|&b| b == 0).unwrap_or(payload.len());
-    
-    let value = String::from_utf8_lossy(&payload[..null_pos])
-        .trim()
-        .to_string();
+    let end = payload.iter().position(|&b| b == 0).unwrap_or(payload.len());
+    if end == 0 {
+        return Ok(None);
+    }
 
-    Ok((!value.is_empty()).then_some(value))
+    let s = String::from_utf8_lossy(&payload[..end]).into_owned();
+    Ok(Some(s))
 }
 
 fn read_rssi(device: &HidDevice, report_id: u8) -> Result<Option<i8>, BridgeError> {
