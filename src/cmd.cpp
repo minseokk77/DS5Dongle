@@ -12,6 +12,7 @@
 #include "config.h"
 #include "device/usbd.h"
 #include "pico/time.h"
+#include "pico/bootrom.h"
 #include "audio.h"
 #include "wake.h"
 
@@ -100,5 +101,9 @@ void pico_cmd_set(uint8_t report_id, uint8_t const *buffer, uint16_t bufsize) {
         tud_disconnect();
         sleep_ms(150);
         tud_connect();
+    }
+    if (buffer[0] == 0x04) {
+        printf("[CMD] Enter bootloader mode\n");
+        reset_usb_boot(0, 0);
     }
 }
