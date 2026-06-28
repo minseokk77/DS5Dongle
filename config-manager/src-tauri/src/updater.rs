@@ -78,7 +78,7 @@ struct GitHubAsset {
 pub async fn check_debug_firmware_update() -> Result<FirmwareUpdateInfo, UpdateError> {
     let update_settings = &settings().firmware_update;
     let releases_api = format!(
-        "https://api.github.com/repos/{}/{}/releases",
+        "https://api.github.com/repos/{}/{}/releases/latest",
         update_settings.github_owner, update_settings.github_repo
     );
     let keyword = update_settings.debug_asset_keyword.to_ascii_lowercase();
@@ -89,24 +89,19 @@ pub async fn check_debug_firmware_update() -> Result<FirmwareUpdateInfo, UpdateE
         .await?
         .error_for_status()?;
         
-    let releases = response.json::<Vec<GitHubRelease>>().await?;
+    let latest = response.json::<GitHubRelease>().await?;
 
-    releases
+    latest
+        .assets
         .into_iter()
-        .filter(|release| !release.draft)
-        .find_map(|release| {
-            release
-                .assets
-                .into_iter()
-                .find(|asset| {
-                    let name = asset.name.to_ascii_lowercase();
-                    name.ends_with(".uf2") && name.contains(&keyword)
-                })
-                .map(|asset| FirmwareUpdateInfo {
-                    version: release.tag_name,
-                    asset_name: asset.name,
-                    download_url: asset.browser_download_url,
-                })
+        .find(|asset| {
+            let name = asset.name.to_ascii_lowercase();
+            name.ends_with(".uf2") && name.contains(&keyword)
+        })
+        .map(|asset| FirmwareUpdateInfo {
+            version: latest.tag_name,
+            asset_name: asset.name,
+            download_url: asset.browser_download_url,
         })
         .ok_or(UpdateError::NoDebugAsset)
 }
@@ -114,7 +109,7 @@ pub async fn check_debug_firmware_update() -> Result<FirmwareUpdateInfo, UpdateE
 pub async fn check_app_update(current_version: &str) -> Result<Option<AppUpdateInfo>, UpdateError> {
     let update_settings = &settings().firmware_update;
     let releases_api = format!(
-        "https://api.github.com/repos/{}/{}/releases",
+        "https://api.github.com/repos/{}/{}/releases/latest",
         update_settings.github_owner, update_settings.github_repo
     );
     
@@ -124,7 +119,7 @@ pub async fn check_app_update(current_version: &str) -> Result<Option<AppUpdateI
         .await?
         .error_for_status()?;
         
-    let releases = response.json::<Vec<GitHubRelease>>().await?;
+    let latest = response.json::<GitHubRelease>().await?;
     
     let current_v = if current_version.starts_with('v') {
         current_version.to_string()
@@ -132,21 +127,20 @@ pub async fn check_app_update(current_version: &str) -> Result<Option<AppUpdateI
         format!("v{}", current_version)
     };
 
-    if let Some(latest) = releases.into_iter().filter(|r| !r.draft).next() {
-        let tag = &latest.tag_name;
-        // Map v0.0.x.y to v0.0.xy for comparison
-        let normalized_tag = if tag.starts_with("v0.0.") {
-            let parts: Vec<&str> = tag.split('.').collect();
-            if parts.len() == 4 {
-                format!("v0.0.{}{}", parts[2], parts[3])
-            } else {
-                tag.clone()
-            }
+    let tag = &latest.tag_name;
+    // Map v0.0.x.y to v0.0.xy for comparison
+    let normalized_tag = if tag.starts_with("v0.0.") {
+        let parts: Vec<&str> = tag.split('.').collect();
+        if parts.len() == 4 {
+            format!("v0.0.{}{}", parts[2], parts[3])
         } else {
             tag.clone()
-        };
+        }
+    } else {
+        tag.clone()
+    };
 
-        if normalized_tag != current_v {
+    if normalized_tag != current_v {
             if let Some(asset) = latest.assets.into_iter().find(|a| {
                 let name = a.name.to_ascii_lowercase();
                 name.ends_with(".exe") && name.contains("setup")
@@ -159,7 +153,6 @@ pub async fn check_app_update(current_version: &str) -> Result<Option<AppUpdateI
                 }));
             }
         }
-    }
     
     Ok(None)
 }
