@@ -1,7 +1,7 @@
 {
   "name": "ds5-bridge-config-tauri",
   "private": true,
-  "version": "0.0.212",
+  "version": "0.0.213",
   "type": "module",
   "scripts": {
     "tauri": "tauri",
