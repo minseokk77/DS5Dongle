@@ -278,9 +278,9 @@
             {/if}
           </select>
 
-          {#if selectedPreset}
-            <span class:modified={selectedPresetModified} class="preset-state">
-              {selectedPreset.name}{selectedPresetModified ? ` · ${text.modified}` : ''}
+          {#if selectedPreset && selectedPresetModified}
+            <span class="preset-state modified">
+              {text.modified}
             </span>
           {/if}
 
