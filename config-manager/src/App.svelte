@@ -1,9 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { invoke } from '@tauri-apps/api/core';
-  import { emitTo, listen } from '@tauri-apps/api/event';
-  import { currentMonitor, getCurrentWindow, LogicalPosition } from '@tauri-apps/api/window';
-  import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+  import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import appIcon from './assets/app-icon.svg';
   import Icon from './lib/Icon.svelte';
   import { i18n, type Lang, type StatusCode } from './lib/i18n';
@@ -17,22 +15,17 @@
     checkDebugFirmwareUpdate,
     flashLatestDebugFirmware,
     listDevices,
-    readCapabilities,
     readConfig,
     readDeviceInfo,
     reconnectUsb,
     recoveryFlashLatestDebugFirmware,
     saveConfig,
-    testAdaptiveTrigger,
-    testVibration,
     type BridgeConfig,
     type BridgeDevice,
-    type DeviceInfo,
-    type FirmwareCapabilities
+    type DeviceInfo
   } from './lib/api';
 
   type ThemeMode = 'light' | 'dark' | 'system';
-  type CloseBehavior = 'tray' | 'exit';
   type DiagnosticKind = 'info' | 'error';
   type UpdateStepCode = 'idle' | 'backup' | 'checking' | 'bootloader' | 'copying' | 'waiting' | 'restoring' | 'done' | 'latest' | 'failed';
 
@@ -41,14 +34,6 @@
     time: string;
     kind: DiagnosticKind;
     message: string;
-    data?: unknown;
-  }
-
-  interface ConfigMismatch {
-    field: keyof BridgeConfig;
-    expected: unknown;
-    actual: unknown;
-    tolerance?: number;
   }
 
   interface FirmwareCapability {
@@ -58,47 +43,25 @@
     reason: string;
   }
 
-  interface DeviceDiagnostics {
-    dongleConnected: boolean;
-    controllerConnected: boolean;
-    gamepadModalOpen: boolean;
-    batteryReportAvailable: boolean;
-    rssiReportAvailable: boolean;
-    configReadable: boolean;
-  }
-
-  type ConnectionState = 'missing' | 'present' | 'ready' | 'stale' | 'error';
-
-  interface DeviceStateModel {
-    dongle: ConnectionState;
-    controller: ConnectionState;
-    gamepad: ConnectionState;
-    battery: ConnectionState;
-    rssi: ConnectionState;
-    config: ConnectionState;
-  }
-
-  interface DiagnosticCheck {
-    key: string;
-    label: string;
-    state: 'waiting' | 'running' | 'passed' | 'failed' | 'skipped' | 'warning';
-    message: string;
-  }
-
-  const isVolumeOverlayWindow = new URLSearchParams(window.location.search).get('overlay') === 'volume';
-  const volumeOverlayLabel = 'volume-osd';
-  const volumeOverlayWidth = 320;
-  const volumeOverlayHeight = 96;
   const defaultConfig: BridgeConfig = {
-    config_version: 3,
+    config_version: 5,
     haptics_gain: 1,
-    speaker_volume_percent: 0,
+    speaker_volume: 50,
+    speaker_volume_percent: 50,
+    headset_volume: 50,
+    speaker_gain: 0,
     inactive_time: 10,
     disable_inactive_disconnect: false,
     disable_pico_led: false,
     polling_rate_mode: 2,
-    haptics_buffer_length: 64,
+    audio_buffer_length: 64,
     controller_mode: 0,
+    enable_usb_sn: false,
+    ps_shortcut_enabled: false,
+    disable_mic: false,
+    disable_speaker: false,
+    enable_wake: false,
+    trigger_reduce: 0,
     stick_calibration_enabled: false,
     left_stick_center_x: 0,
     left_stick_center_y: 0,
@@ -118,148 +81,73 @@
   const appVersion = '0.0.2.3';
   const releaseChannel = 'debug';
   const updateRepository = 'minseokk77/DS5Dongle';
-  const updateStepOrder: UpdateStepCode[] = ['backup', 'checking', 'bootloader', 'copying', 'waiting', 'restoring', 'done'];
 
-  const emptyDeviceInfo = (): DeviceInfo => ({
+  let lang: Lang = $state('ko');
+  let themeMode: ThemeMode = $state('system');
+  let systemTheme: 'light' | 'dark' = $state('dark');
+  let devices: BridgeDevice[] = $state([]);
+  let selectedDeviceId = $state('');
+  let config: BridgeConfig = $state({ ...defaultConfig });
+  let originalConfig: BridgeConfig | null = $state(null);
+  let deviceInfo: DeviceInfo = $state({
     usb_vendor_name: '',
     usb_speed_class: '',
-    rssi_strength_label: '',
-    dongle_connected: false,
-    controller_connected: false,
-    battery_report_available: false,
-    rssi_report_available: false,
-    config_readable: false
+    rssi_strength_label: ''
   });
+  let statusCode: StatusCode = $state('ready');
+  let statusOverride = $state('');
+  let toastText = $state('');
+  let toastKind: 'info' | 'error' = $state('info');
+  let toastTimer: number | undefined = $state(undefined);
+  let deviceInfoRefreshTimer: number | undefined = $state(undefined);
+  let devicePresenceRefreshTimer: number | undefined = $state(undefined);
+  let delayedInfoRefreshTimer: number | undefined = $state(undefined);
+  let isBusy = $state(false);
+  let errorText = $state('');
+  let autoFirmwareUpdate = $state(false);
+  let showInputTesterModal = $state(false);
+  let showSettingsModal = $state(false);
+  let diagnosticLogs: DiagnosticLog[] = $state([]);
+  let updateStep: UpdateStepCode = $state('idle');
 
-  let lang: Lang = 'ko';
-  let themeMode: ThemeMode = 'system';
-  let closeBehavior: CloseBehavior = 'tray';
-  let systemTheme: 'light' | 'dark' = 'dark';
-  let devices: BridgeDevice[] = [];
-  let selectedDeviceId = '';
-  let config: BridgeConfig = { ...defaultConfig };
-  let originalConfig: BridgeConfig | null = null;
-  let deviceInfo: DeviceInfo = emptyDeviceInfo();
-  let statusCode: StatusCode = 'ready';
-  let statusOverride = '';
-  let toastText = '';
-  let toastKind: 'info' | 'error' = 'info';
-  let toastTimer: number | undefined;
-  let deviceInfoRefreshTimer: number | undefined;
-  let devicePresenceRefreshTimer: number | undefined;
-  let delayedInfoRefreshTimer: number | undefined;
-  let telemetryClockTimer: number | undefined;
-  let volumeOverlayPollTimer: number | undefined;
-  let deviceInfoRefreshBusy = false;
-  let devicePresenceRefreshBusy = false;
-  let isBusy = false;
-  let errorText = '';
-  let autoFirmwareUpdate = false;
-  let showInputTesterModal = false;
-  let showSettingsModal = false;
-  let diagnosticLogs: DiagnosticLog[] = [];
-  let updateStep: UpdateStepCode = 'idle';
-  let showUpdateProgressModal = false;
-  let lastUpdateError = '';
-  let telemetryClock = Date.now();
-  let lastRssi: number | null = null;
-  let lastRssiSeenAt = 0;
-  let lastBatteryLevel: number | null = null;
-  let lastBatteryCharging: boolean | null = null;
-  let lastBatterySeenAt = 0;
-  let diagnosticChecks: DiagnosticCheck[] = [];
-  let diagnosticChecksRunning = false;
-  let volumeOverlayWindow: WebviewWindow | null = null;
-  let volumeOverlayPollBusy = false;
-  let lastObservedSpeakerVolume = Math.round(defaultConfig.speaker_volume_percent);
-  let overlayVolume = 0;
-  let overlayVisible = false;
-  let overlayHideTimer: number | undefined;
-
-  $: text = i18n[lang];
-  $: effectiveTheme = themeMode === 'system' ? systemTheme : themeMode;
-  $: selectedDevice = devices.find((device) => device.id === selectedDeviceId) ?? null;
-  $: isConfigOnlyMode = Boolean(selectedDevice?.config_only);
-  $: isBridgeConnected = Boolean(selectedDeviceId && selectedDevice && deviceInfo.dongle_connected !== false && statusCode !== 'noDevice');
-  $: isControllerConnected = Boolean(isBridgeConnected && deviceInfo.controller_connected);
-  $: showControllerUi = isControllerConnected;
-  $: isDirty = originalConfig ? JSON.stringify(originalConfig) !== JSON.stringify(config) : false;
-  $: statusText = statusOverride || text.status[statusCode];
-  $: bridgeStatusText = isBridgeConnected
-    ? (isConfigOnlyMode ? text.configOnlyMode : text.picoConnected)
-    : text.picoDisconnected;
-  $: firmwareLabel = formatFirmwareVersion(deviceInfo.firmware_version);
-  $: settingsFirmwareVersion = formatFirmwareVersion(deviceInfo.firmware_version);
-  $: versionCompatibilityWarning = buildVersionCompatibilityWarning();
-  $: displayedRssi = deviceInfo.rssi ?? (telemetryClock - lastRssiSeenAt <= 15000 ? lastRssi : null);
-  $: rssiIsStale = deviceInfo.rssi === undefined || deviceInfo.rssi === null ? displayedRssi !== null : false;
-  $: rssiLabel =
-    displayedRssi === null || displayedRssi === undefined ? text.unknown : `${displayedRssi} dBm${rssiIsStale ? ` · ${text.previousValue}` : ''}`;
-  $: usbVendorLabel = deviceInfo.usb_vendor_name || '';
-  $: usbSpeedLabel = localizeUsbSpeed(deviceInfo.usb_speed_class || '');
-  $: rssiStatusLabel = localizeSignalStatus(deviceInfo.rssi_strength_label || '');
-  $: batteryLevel = deviceInfo.battery_level !== undefined && deviceInfo.battery_level !== null
-    ? deviceInfo.battery_level
-    : (telemetryClock - lastBatterySeenAt <= 15000 ? lastBatteryLevel : null);
-  $: batteryIsStale = deviceInfo.battery_level === undefined || deviceInfo.battery_level === null ? batteryLevel !== null : false;
-  $: isCharging = deviceInfo.is_charging !== undefined && deviceInfo.is_charging !== null
-    ? deviceInfo.is_charging
-    : (telemetryClock - lastBatterySeenAt <= 15000 ? lastBatteryCharging : null);
-  $: deviceTitle = showControllerUi && selectedDevice
+  let text = $derived(i18n[lang]);
+  let effectiveTheme = $derived(themeMode === 'system' ? systemTheme : themeMode);
+  let selectedDevice = $derived(devices.find((device) => device.id === selectedDeviceId) ?? null);
+  let isBridgeConnected = $derived(Boolean(selectedDeviceId && selectedDevice && statusCode !== 'noDevice'));
+  let isControllerConnected = $derived(Boolean(isBridgeConnected && deviceInfo.controller_connected));
+  let showControllerUi = $derived(Boolean(isControllerConnected && deviceInfo.battery_level !== undefined && deviceInfo.battery_level !== null));
+  let isDirty = $derived(originalConfig ? JSON.stringify(originalConfig) !== JSON.stringify(config) : false);
+  let statusText = $derived(statusOverride || text.status[statusCode]);
+  let bridgeStatusText = $derived(isBridgeConnected ? text.picoConnected : text.picoDisconnected);
+  let actionPanelStatusText = $derived((statusCode === 'idle' || statusCode === 'noDevice' || statusCode === 'connected') && !statusOverride ? bridgeStatusText : statusText);
+  let firmwareLabel = $derived(formatFirmwareVersion(deviceInfo.firmware_version));
+  let settingsFirmwareVersion = $derived(formatFirmwareVersion(deviceInfo.firmware_version));
+  let rssiLabel = $derived(
+    deviceInfo.rssi === null || deviceInfo.rssi === undefined ? text.unknown : `${deviceInfo.rssi} dBm`);
+  let usbVendorLabel = $derived(deviceInfo.usb_vendor_name || '');
+  let usbSpeedLabel = $derived(localizeUsbSpeed(deviceInfo.usb_speed_class || ''));
+  let rssiStatusLabel = $derived(localizeSignalStatus(deviceInfo.rssi_strength_label || ''));
+  let batteryLevel = $derived(deviceInfo.battery_level !== undefined && deviceInfo.battery_level !== null ? deviceInfo.battery_level : null);
+  let isCharging = $derived(deviceInfo.is_charging !== undefined && deviceInfo.is_charging !== null ? deviceInfo.is_charging : null);
+  let deviceTitle = $derived(isControllerConnected && selectedDevice
     ? `${selectedDevice.label.split(' - ')[0]} · ${selectedDevice.vendor_id.toString(16).padStart(4, '0').toUpperCase()}:${selectedDevice.product_id.toString(16).padStart(4, '0').toUpperCase()}`
-    : text.controllerDisconnected;
-  $: firmwareCapabilities = buildFirmwareCapabilities();
-  $: diagnosticStateKey = diagnosticChecks.map((check) => `${check.key}:${check.state}`).join('|');
-  $: deviceStateModel = buildDeviceStateModel(diagnosticStateKey);
-  $: deviceDiagnostics = buildDeviceDiagnostics(deviceStateModel);
-  $: updateStepText = updateStep === 'idle' ? '' : text.updateSteps[updateStep];
-  $: updateProgress = updateStepProgress(updateStep);
-  $: calibrationEnabled = Boolean(config.stick_calibration_enabled);
-  $: leftCalibrationSummary = calibrationSummary(
+    : text.disconnected);
+  let firmwareCapabilities = $derived(buildFirmwareCapabilities());
+  let updateStepText = $derived(updateStep === 'idle' ? '' : text.updateSteps[updateStep]);
+  let updateProgress = $derived(updateStepProgress(updateStep));
+  let calibrationEnabled = $derived(Boolean(config.stick_calibration_enabled));
+  let leftCalibrationSummary = $derived(calibrationSummary(
     config.left_stick_center_x,
     config.left_stick_center_y,
     config.left_stick_deadzone
-  );
-  $: rightCalibrationSummary = calibrationSummary(
+  ));
+  let rightCalibrationSummary = $derived(calibrationSummary(
     config.right_stick_center_x,
     config.right_stick_center_y,
     config.right_stick_deadzone
-  );
+  ));
 
   onMount(() => {
-    if (isVolumeOverlayWindow) {
-      document.documentElement.classList.add('volume-overlay-document');
-      document.body.classList.add('volume-overlay-body');
-      let unlistenOverlay: (() => void) | undefined;
-
-      const setupOverlayListener = async () => {
-        unlistenOverlay = await listen<{ volume: number }>('volume-overlay-show', (event) => {
-          overlayVolume = Math.max(0, Math.min(100, Math.round(Number(event.payload?.volume ?? 0))));
-          overlayVisible = true;
-          void getCurrentWindow().show();
-          if (overlayHideTimer !== undefined) {
-            window.clearTimeout(overlayHideTimer);
-          }
-          overlayHideTimer = window.setTimeout(() => {
-            overlayVisible = false;
-            window.setTimeout(() => {
-              void getCurrentWindow().hide();
-              overlayHideTimer = undefined;
-            }, 160);
-          }, 1100);
-        });
-      };
-
-      void setupOverlayListener();
-
-      return () => {
-        if (overlayHideTimer !== undefined) {
-          window.clearTimeout(overlayHideTimer);
-        }
-        if (unlistenOverlay) unlistenOverlay();
-      };
-    }
-
     // 저장된 언어와 테마 설정을 먼저 반영합니다.
     const savedLang = localStorage.getItem('ds5:lang');
     if (savedLang === 'ko' || savedLang === 'en' || savedLang === 'zh') {
@@ -269,11 +157,6 @@
     const savedTheme = localStorage.getItem('ds5:themeMode');
     if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
       themeMode = savedTheme;
-    }
-
-    const savedCloseBehavior = localStorage.getItem('ds5:closeBehavior');
-    if (savedCloseBehavior === 'tray' || savedCloseBehavior === 'exit') {
-      closeBehavior = savedCloseBehavior;
     }
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
@@ -288,18 +171,11 @@
     // 장치 상태를 주기적으로 갱신합니다.
     void refreshDevices();
     deviceInfoRefreshTimer = window.setInterval(() => {
-      telemetryClock = Date.now();
       void refreshDeviceInfoOnly();
-    }, 4000);
-    telemetryClockTimer = window.setInterval(() => {
-      telemetryClock = Date.now();
-    }, 1000);
+    }, 2500);
     devicePresenceRefreshTimer = window.setInterval(() => {
       void syncDevicePresence();
-    }, 9000);
-    volumeOverlayPollTimer = window.setInterval(() => {
-      void pollExternalSpeakerVolume();
-    }, 1200);
+    }, 3000);
 
     let unlisten: (() => void) | undefined;
 
@@ -330,12 +206,6 @@
       if (delayedInfoRefreshTimer !== undefined) {
         window.clearTimeout(delayedInfoRefreshTimer);
       }
-      if (telemetryClockTimer !== undefined) {
-        window.clearInterval(telemetryClockTimer);
-      }
-      if (volumeOverlayPollTimer !== undefined) {
-        window.clearInterval(volumeOverlayPollTimer);
-      }
       if (unlisten) unlisten();
     };
   });
@@ -357,14 +227,13 @@
     }, 4200);
   }
 
-  function addLog(message: string, kind: DiagnosticKind = 'info', data?: unknown) {
+  function addLog(message: string, kind: DiagnosticKind = 'info') {
     diagnosticLogs = [
       {
         id: Date.now(),
         time: new Date().toLocaleTimeString(),
         kind,
-        message,
-        ...(data === undefined ? {} : { data })
+        message
       },
       ...diagnosticLogs
     ].slice(0, 40);
@@ -384,11 +253,6 @@
   function handleThemeChange(nextTheme: ThemeMode) {
     themeMode = nextTheme;
     localStorage.setItem('ds5:themeMode', nextTheme);
-  }
-
-  function handleCloseBehaviorChange(nextBehavior: CloseBehavior) {
-    closeBehavior = nextBehavior;
-    localStorage.setItem('ds5:closeBehavior', nextBehavior);
   }
 
   function setAutoFirmwareUpdate(enabled: boolean) {
@@ -412,31 +276,6 @@
     return semanticVersion ? semanticVersion[0] : primary;
   }
 
-  function displayReleaseVersion(bundleVersion: string) {
-    const normalized = bundleVersion.trim();
-    const compact = normalized.match(/^0\.0\.(\d{2,})$/);
-    if (!compact) {
-      return normalized;
-    }
-
-    const compactPatch = compact[1];
-    return `0.0.${compactPatch.slice(0, -1)}.${compactPatch.slice(-1)}`;
-  }
-
-  function comparableReleaseVersion(version: string) {
-    return normalizeFirmwareVersion(version).replace(/^v/i, '').toLowerCase();
-  }
-
-  function buildVersionCompatibilityWarning() {
-    const appComparable = comparableReleaseVersion(appVersion);
-    const firmwareComparable = comparableReleaseVersion(settingsFirmwareVersion);
-    if (!selectedDeviceId || !appComparable || !firmwareComparable || settingsFirmwareVersion === text.unknown) {
-      return '';
-    }
-
-    return appComparable === firmwareComparable ? '' : `${text.versionMismatchWarning}: ${text.appVersion} ${appVersion} / ${text.firmwareVersion} ${settingsFirmwareVersion}`;
-  }
-
   function isCurrentFirmware(updateVersion: string) {
     const current = normalizeFirmwareVersion(deviceInfo.firmware_version).toLowerCase();
     const latest = normalizeFirmwareVersion(updateVersion).toLowerCase();
@@ -449,184 +288,32 @@
 
   function buildFirmwareCapabilities(): FirmwareCapability[] {
     const hasBridge = Boolean(selectedDeviceId) || devices.length > 0 || statusCode !== 'noDevice';
-    const caps = deviceInfo.capabilities;
-    const legacyReason = hasBridge ? text.legacyFirmwareCapabilityUnknown : text.capRequiresBridge;
-    const legacySupported = new Set(['vibration', 'trigger', 'bootloader', 'calibration']);
-    const capability = (key: string, label: string, supported?: boolean): FirmwareCapability => ({
-      key,
-      label,
-      supported: hasBridge && (caps ? Boolean(supported) : Boolean(supported) || legacySupported.has(key)),
-      reason: caps ? text.capUnsupportedByFirmware : legacyReason
-    });
-
     return [
-      ...(caps?.supports_battery || deviceInfo.battery_report_available
-        ? [capability('battery', text.capBattery, caps?.supports_battery ?? true)]
-        : []),
-      capability('vibration', text.capVibration, caps?.supports_vibration_test),
-      capability('trigger', text.capAdaptiveTrigger, caps?.supports_adaptive_trigger),
-      capability('bootloader', text.capFirmwareUpdate, caps?.supports_bootloader_command),
-      capability('calibration', text.stickCalibration, caps?.supports_stick_calibration ?? config.config_version >= 3)
+      {
+        key: 'vibration',
+        label: text.capVibration,
+        supported: hasBridge,
+        reason: text.capRequiresBridge
+      },
+      {
+        key: 'trigger',
+        label: text.capAdaptiveTrigger,
+        supported: hasBridge,
+        reason: text.capRequiresBridge
+      },
+      {
+        key: 'bootloader',
+        label: text.capBootloader,
+        supported: hasBridge,
+        reason: text.capRequiresBridge
+      },
+      {
+        key: 'calibration',
+        label: text.stickCalibration,
+        supported: hasBridge && config.config_version >= 3,
+        reason: hasBridge ? text.calibrationNoInfo : text.capRequiresBridge
+      }
     ];
-  }
-
-  function buildDeviceDiagnostics(model: DeviceStateModel): DeviceDiagnostics {
-    return {
-      dongleConnected: model.dongle === 'ready' || model.dongle === 'present',
-      controllerConnected: model.controller === 'ready' || model.controller === 'present',
-      gamepadModalOpen: showInputTesterModal,
-      batteryReportAvailable: model.battery === 'ready' || model.battery === 'stale',
-      rssiReportAvailable: model.rssi === 'ready' || model.rssi === 'stale',
-      configReadable: model.config === 'ready' || model.config === 'stale'
-    };
-  }
-
-  function buildDeviceStateModel(_diagnosticStateKey: string): DeviceStateModel {
-    const telemetryFreshMs = 15000;
-    const deviceInfoPassed = diagnosticCheckState('deviceInfo') === 'passed';
-    const configPassed = diagnosticCheckState('config') === 'passed';
-    const telemetryPassed = diagnosticCheckState('telemetry') === 'passed';
-    const hasTelemetry = Boolean(deviceInfo.battery_report_available || deviceInfo.rssi_report_available || displayedRssi !== null || batteryLevel !== null || telemetryPassed);
-    return {
-      dongle: isBridgeConnected || deviceInfoPassed || Boolean(selectedDeviceId) ? 'ready' : 'missing',
-      controller: isControllerConnected || hasTelemetry ? 'ready' : 'missing',
-      gamepad: showInputTesterModal ? 'present' : 'missing',
-      battery: deviceInfo.battery_report_available
-        ? 'ready'
-        : (telemetryClock - lastBatterySeenAt <= telemetryFreshMs || telemetryPassed ? 'stale' : 'missing'),
-      rssi: deviceInfo.rssi_report_available
-        ? 'ready'
-        : (telemetryClock - lastRssiSeenAt <= telemetryFreshMs || telemetryPassed ? 'stale' : 'missing'),
-      config: deviceInfo.config_readable || configPassed ? 'ready' : (originalConfig ? 'stale' : 'missing')
-    };
-  }
-
-  function diagnosticCheckState(key: string): DiagnosticCheck['state'] | undefined {
-    return diagnosticChecks.find((check) => check.key === key)?.state;
-  }
-
-  function rememberTelemetry(info: DeviceInfo) {
-    if (info.rssi !== undefined && info.rssi !== null) {
-      lastRssi = info.rssi;
-      lastRssiSeenAt = Date.now();
-    }
-    if (info.battery_level !== undefined && info.battery_level !== null) {
-      lastBatteryLevel = info.battery_level;
-      lastBatteryCharging = info.is_charging ?? false;
-      lastBatterySeenAt = Date.now();
-    }
-  }
-
-  function resetDeviceTelemetry() {
-    lastRssi = null;
-    lastRssiSeenAt = 0;
-    lastBatteryLevel = null;
-    lastBatteryCharging = null;
-    lastBatterySeenAt = 0;
-  }
-
-  function makeDiagnosticChecks(): DiagnosticCheck[] {
-    return [
-      { key: 'deviceInfo', label: text.diagCheckDeviceInfo, state: 'waiting', message: '' },
-      { key: 'capabilities', label: text.diagCheckCapabilities, state: 'waiting', message: '' },
-      { key: 'config', label: text.diagCheckConfig, state: 'waiting', message: '' },
-      { key: 'vibration', label: text.capVibration, state: 'waiting', message: '' },
-      { key: 'trigger', label: text.capAdaptiveTrigger, state: 'waiting', message: '' },
-      { key: 'telemetry', label: text.diagTelemetry, state: 'waiting', message: '' }
-    ];
-  }
-
-  function setDiagnosticCheck(key: string, patch: Partial<DiagnosticCheck>) {
-    diagnosticChecks = diagnosticChecks.map((check) => (check.key === key ? { ...check, ...patch } : check));
-  }
-
-  async function runDeviceDiagnosticChecks() {
-    diagnosticChecks = makeDiagnosticChecks();
-    diagnosticChecksRunning = true;
-    const deviceId = selectedDeviceId;
-    if (!deviceId) {
-      diagnosticChecks = diagnosticChecks.map((check) => ({ ...check, state: 'skipped', message: text.capRequiresBridge }));
-      diagnosticChecksRunning = false;
-      return;
-    }
-
-    try {
-      setDiagnosticCheck('deviceInfo', { state: 'running', message: text.status.reading });
-      const info = await readDeviceInfo(deviceId);
-      deviceInfo = info;
-      rememberTelemetry(info);
-      setStatus('connected');
-      setDiagnosticCheck('deviceInfo', { state: 'passed', message: text.diagnosticPassed });
-
-      setDiagnosticCheck('capabilities', { state: 'running', message: text.status.reading });
-      try {
-        const caps = await readCapabilities(deviceId);
-        deviceInfo = { ...deviceInfo, capabilities: caps, capabilities_error: null };
-        const isFallback = caps.build_channel?.startsWith('fallback:');
-        setDiagnosticCheck('capabilities', {
-          state: 'passed',
-          message: isFallback ? text.featureReportFallback : text.diagnosticPassed
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : text.errorUnknown;
-        const isHidParameterError = message.includes('os error 87') || message.includes('매개 변수');
-        setDiagnosticCheck('capabilities', {
-          state: isHidParameterError ? 'warning' : 'failed',
-          message: isHidParameterError ? text.featureReportFallback : message
-        });
-        addLog(`${text.diagCheckCapabilities}: ${message}`, isHidParameterError ? 'info' : 'error');
-      }
-
-      setDiagnosticCheck('config', { state: 'running', message: text.status.reading });
-      try {
-        const readback = await readConfig(deviceId);
-        config = readback;
-        originalConfig = structuredClone(readback);
-        setDiagnosticCheck('config', { state: 'passed', message: `v${readback.config_version}` });
-      } catch (error) {
-        setDiagnosticCheck('config', { state: 'failed', message: error instanceof Error ? error.message : text.errorUnknown });
-        addLog(`${text.diagCheckConfig}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
-      }
-
-      const caps = deviceInfo.capabilities;
-      const legacyTestSupport = Boolean(config.config_version >= 3);
-      const supportsVibrationTest = caps ? caps.supports_vibration_test : legacyTestSupport;
-      const supportsAdaptiveTrigger = caps ? caps.supports_adaptive_trigger : legacyTestSupport;
-
-      if (supportsVibrationTest) {
-        setDiagnosticCheck('vibration', { state: 'running', message: text.vibrationRunning });
-        try {
-          await testVibration(deviceId, 0.15, 0.15, 120);
-          setDiagnosticCheck('vibration', { state: 'passed', message: text.diagnosticPassed });
-        } catch (error) {
-          setDiagnosticCheck('vibration', { state: 'failed', message: error instanceof Error ? error.message : text.errorUnknown });
-          addLog(`${text.vibrationTestFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
-        }
-      } else {
-        setDiagnosticCheck('vibration', { state: 'skipped', message: text.capUnsupportedByFirmware });
-      }
-
-      if (supportsAdaptiveTrigger) {
-        setDiagnosticCheck('trigger', { state: 'running', message: text.adaptiveTriggerRunning });
-        try {
-          await testAdaptiveTrigger(deviceId, 'right', 0.25, 0.25, 120);
-          setDiagnosticCheck('trigger', { state: 'passed', message: text.diagnosticPassed });
-        } catch (error) {
-          setDiagnosticCheck('trigger', { state: 'failed', message: error instanceof Error ? error.message : text.errorUnknown });
-          addLog(`${text.adaptiveTriggerFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
-        }
-      } else {
-        setDiagnosticCheck('trigger', { state: 'skipped', message: text.capUnsupportedByFirmware });
-      }
-
-      const telemetryOk = Boolean(deviceInfo.battery_report_available || deviceInfo.rssi_report_available || displayedRssi !== null || batteryLevel !== null);
-      setDiagnosticCheck('telemetry', {
-        state: telemetryOk ? 'passed' : 'skipped',
-        message: telemetryOk ? text.telemetryReceived : text.telemetryWaiting
-      });
-    } finally {
-      diagnosticChecksRunning = false;
-    }
   }
 
   function updateStepProgress(step: UpdateStepCode) {
@@ -637,155 +324,9 @@
     return Math.max(0, Math.round((Math.max(index, 0) / 7) * 100));
   }
 
-  function getUpdateStepState(step: UpdateStepCode) {
-    if (updateStep === 'failed' || updateStep === 'latest' || updateStep === 'idle') {
-      return 'waiting';
-    }
-
-    const activeIndex = updateStepOrder.indexOf(updateStep);
-    const stepIndex = updateStepOrder.indexOf(step);
-    if (updateStep === 'done' || stepIndex < activeIndex) return 'done';
-    if (stepIndex === activeIndex) return 'active';
-    return 'waiting';
-  }
-
-  function getUpdateStepMarker(step: UpdateStepCode) {
-    const state = getUpdateStepState(step);
-    if (state === 'done') return '✓';
-    return '';
-  }
-
-  function finishUpdateProgressModal() {
-    if (updateStep !== 'done' && updateStep !== 'latest') {
-      return;
-    }
-
-    window.setTimeout(() => {
-      showUpdateProgressModal = false;
-      updateStep = 'idle';
-    }, 1400);
-  }
-
   function calibrationSummary(centerX?: number, centerY?: number, deadzone?: number) {
     if (centerX === undefined || centerY === undefined || deadzone === undefined) return '';
     return `X ${centerX.toFixed(3)} / Y ${centerY.toFixed(3)} · ${deadzone.toFixed(1)}%`;
-  }
-
-  function configMismatchDetails(verified: BridgeConfig, expected: BridgeConfig): ConfigMismatch[] {
-    const details: ConfigMismatch[] = [];
-    const stickTolerance = 0.012;
-    const percentTolerance = 0.2;
-    const floatTolerance = 0.02;
-
-    const checkExact = (field: keyof BridgeConfig) => {
-      if (verified[field] !== expected[field]) {
-        details.push({ field, expected: expected[field], actual: verified[field] });
-      }
-    };
-
-    const checkBool = (field: keyof BridgeConfig) => {
-      if (Boolean(verified[field]) !== Boolean(expected[field])) {
-        details.push({ field, expected: Boolean(expected[field]), actual: Boolean(verified[field]) });
-      }
-    };
-
-    const checkNumber = (field: keyof BridgeConfig, tolerance: number) => {
-      const actual = Number(verified[field] ?? 0);
-      const expectedValue = Number(expected[field] ?? 0);
-      if (Math.abs(actual - expectedValue) > tolerance) {
-        details.push({ field, expected: expectedValue, actual, tolerance });
-      }
-    };
-
-    checkExact('config_version');
-    checkNumber('haptics_gain', floatTolerance);
-    checkNumber('speaker_volume_percent', floatTolerance);
-    checkExact('inactive_time');
-    checkExact('disable_inactive_disconnect');
-    checkExact('disable_pico_led');
-    checkExact('polling_rate_mode');
-    checkExact('haptics_buffer_length');
-    checkExact('controller_mode');
-    checkBool('stick_calibration_enabled');
-    checkNumber('left_stick_center_x', stickTolerance);
-    checkNumber('left_stick_center_y', stickTolerance);
-    checkNumber('left_stick_deadzone', percentTolerance);
-    checkNumber('right_stick_center_x', stickTolerance);
-    checkNumber('right_stick_center_y', stickTolerance);
-    checkNumber('right_stick_deadzone', percentTolerance);
-    checkNumber('left_stick_min_x', stickTolerance);
-    checkNumber('left_stick_max_x', stickTolerance);
-    checkNumber('left_stick_min_y', stickTolerance);
-    checkNumber('left_stick_max_y', stickTolerance);
-    checkNumber('right_stick_min_x', stickTolerance);
-    checkNumber('right_stick_max_x', stickTolerance);
-    checkNumber('right_stick_min_y', stickTolerance);
-    checkNumber('right_stick_max_y', stickTolerance);
-
-    return details;
-  }
-
-  function isCalibrationMismatch(field: keyof BridgeConfig) {
-    return String(field).startsWith('left_stick_') || String(field).startsWith('right_stick_') || field === 'stick_calibration_enabled';
-  }
-
-  async function saveAndVerify(deviceId: string, nextConfig: BridgeConfig) {
-    await applyConfig(deviceId, nextConfig);
-    await saveConfig(deviceId);
-    const verified = await readConfig(deviceId);
-    const mismatchDetails = configMismatchDetails(verified, nextConfig);
-    if (mismatchDetails.length > 0) {
-      const visibleMismatches = mismatchDetails.filter((detail) => !isCalibrationMismatch(detail.field));
-      addLog(visibleMismatches.length > 0 ? text.settingsVerifyMismatch : text.settingsVerifyAdjusted, visibleMismatches.length > 0 ? 'error' : 'info', { mismatches: mismatchDetails });
-      mismatchDetails.forEach((detail) =>
-        addLog(
-          `${text.settingsVerifyMismatch}: ${String(detail.field)} expected=${String(detail.expected)}, actual=${String(detail.actual)}`,
-          visibleMismatches.length > 0 ? 'error' : 'info',
-          detail
-        )
-      );
-      if (visibleMismatches.length > 0) {
-        showToast(text.settingsVerifyMismatch, 'error');
-      }
-    }
-    config = verified;
-    originalConfig = structuredClone(verified);
-    lastObservedSpeakerVolume = Math.round(Number(verified.speaker_volume_percent) || 0);
-  }
-
-  function exportDiagnosticLogs() {
-    const payload = {
-      exported_at: new Date().toISOString(),
-      app_version: appVersion,
-      firmware_version: settingsFirmwareVersion,
-      device_state: {
-        model: deviceStateModel,
-        dongle_connected: isBridgeConnected,
-        controller_connected: isControllerConnected,
-        gamepad_modal_open: showInputTesterModal,
-        battery_report_available: Boolean(deviceInfo.battery_report_available),
-        rssi_report_available: Boolean(deviceInfo.rssi_report_available),
-        battery_value_stale: batteryIsStale,
-        rssi_value_stale: rssiIsStale,
-        config_readable: Boolean(deviceInfo.config_readable)
-      },
-      last_update_step: updateStep,
-      last_update_error: lastUpdateError,
-      hid_errors: {
-        firmware_error: deviceInfo.firmware_error ?? null,
-        rssi_error: deviceInfo.rssi_error ?? null,
-        capabilities_error: deviceInfo.capabilities_error ?? null
-      },
-      capabilities: deviceInfo.capabilities ?? null,
-      diagnostic_checks: diagnosticChecks,
-      logs: diagnosticLogs
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `ds5-dongle-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-    link.click();
-    URL.revokeObjectURL(link.href);
   }
 
   function localizeUsbSpeed(raw: string) {
@@ -813,21 +354,35 @@
       await task();
     } catch (error) {
       errorText = error instanceof Error ? error.message : text.errorUnknown;
-      lastUpdateError = errorText;
       showError(errorText);
+      if (updateStep !== 'idle') {
+        updateStep = 'failed';
+      }
     } finally {
+      if (updateStep !== 'idle') {
+        await sleep(1500);
+        updateStep = 'idle';
+      }
       isBusy = false;
     }
   }
 
   async function refreshDevices() {
     await runTask(async () => {
-      devices = await listDevices();
+      setStatus('reading');
+      let latestDevices = await listDevices();
+      
+      // 듀얼센스 연결/해제 시 USB가 잠시 재연결되며 목록이 비는 현상(flicker) 방지
+      if (!latestDevices.length && selectedDeviceId) {
+        await sleep(1200);
+        latestDevices = await listDevices();
+      }
+
+      devices = latestDevices;
       if (!devices.length) {
         selectedDeviceId = '';
         originalConfig = null;
-        deviceInfo = emptyDeviceInfo();
-        resetDeviceTelemetry();
+        deviceInfo = {};
         setStatus('noDevice');
         return;
       }
@@ -850,58 +405,65 @@
   }
 
   async function refreshDeviceInfoOnly() {
-    if (!selectedDeviceId || deviceInfoRefreshBusy || isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
+    if (!selectedDeviceId || isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
       return;
     }
 
-    deviceInfoRefreshBusy = true;
     const deviceId = selectedDeviceId;
     try {
       const nextInfo = await readDeviceInfo(deviceId);
       if (selectedDeviceId === deviceId) {
-        deviceInfo = {
-          ...deviceInfo,
-          ...nextInfo,
-          capabilities: deviceInfo.capabilities ?? nextInfo.capabilities ?? null,
-          capabilities_error: deviceInfo.capabilities_error ?? nextInfo.capabilities_error ?? null,
-          config_readable: deviceInfo.config_readable || nextInfo.config_readable
-        };
-        rememberTelemetry(nextInfo);
+        deviceInfo = nextInfo;
       }
     } catch (error) {
       addLog(`${text.logDeviceInfoFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
       await syncDevicePresence();
-    } finally {
-      deviceInfoRefreshBusy = false;
     }
   }
 
   async function syncDevicePresence() {
-    if (devicePresenceRefreshBusy || isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
+    if (isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
       return;
     }
 
-    devicePresenceRefreshBusy = true;
     try {
-      const latestDevices = await listDevices();
+      let latestDevices = await listDevices();
+      
+      // 듀얼센스 연결/해제 시 USB가 잠시 재연결되며 목록이 비는 현상(flicker) 방지
+      if (!latestDevices.length && selectedDeviceId) {
+        await sleep(1200);
+        latestDevices = await listDevices();
+      }
+
       devices = latestDevices;
-      if (!latestDevices.length || !latestDevices.some((device) => device.id === selectedDeviceId)) {
+      if (!latestDevices.length) {
         selectedDeviceId = '';
         originalConfig = null;
-        deviceInfo = emptyDeviceInfo();
-        resetDeviceTelemetry();
+        deviceInfo = {
+          usb_vendor_name: '',
+          usb_speed_class: '',
+          rssi_strength_label: ''
+        };
         setStatus('noDevice');
+      } else if (!selectedDeviceId || !latestDevices.some((device) => device.id === selectedDeviceId)) {
+        // 이전에 선택된 장치가 사라졌지만 다른 장치가 남아있는 경우 자동 선택
+        selectedDeviceId = latestDevices[0].id;
+        // 새로 선택된 장치의 정보를 읽어옵니다.
+        void readAll().then(() => {
+          if (statusCode === 'noDevice') setStatus('connected');
+        });
       }
     } catch {
       addLog(text.logDevicePresenceFailed, 'error');
       selectedDeviceId = '';
       devices = [];
       originalConfig = null;
-      deviceInfo = emptyDeviceInfo();
-      resetDeviceTelemetry();
+      deviceInfo = {
+        usb_vendor_name: '',
+        usb_speed_class: '',
+        rssi_strength_label: ''
+      };
       setStatus('noDevice');
-    } finally {
-      devicePresenceRefreshBusy = false;
     }
   }
 
@@ -919,37 +481,21 @@
     if (!selectedDeviceId) return;
     setStatus('reading');
 
-    const [infoResult, configResult, capabilitiesResult] = await Promise.allSettled([
+    const [infoResult, configResult] = await Promise.allSettled([
       readDeviceInfo(selectedDeviceId),
-      readConfig(selectedDeviceId),
-      readCapabilities(selectedDeviceId)
+      readConfig(selectedDeviceId)
     ]);
 
     if (infoResult.status === 'fulfilled') {
       deviceInfo = infoResult.value;
-      rememberTelemetry(infoResult.value);
-      if (selectedDevice?.config_only && infoResult.value.controller_connected) {
-        statusOverride = text.dualSenseModeSwitching;
-      }
     } else {
       addLog(`${text.logDeviceInfoFailed}: ${infoResult.reason}`, 'error');
     }
     if (configResult.status === 'fulfilled') {
       config = configResult.value;
-      originalConfig = structuredClone(configResult.value);
-      lastObservedSpeakerVolume = Math.round(Number(configResult.value.speaker_volume_percent) || 0);
-      deviceInfo = { ...deviceInfo, config_readable: true };
+      originalConfig = JSON.parse(JSON.stringify(configResult.value));
     } else {
       throw configResult.reason;
-    }
-    if (capabilitiesResult.status === 'fulfilled') {
-      deviceInfo = { ...deviceInfo, capabilities: capabilitiesResult.value, capabilities_error: null };
-    } else {
-      deviceInfo = {
-        ...deviceInfo,
-        capabilities: deviceInfo.capabilities ?? null,
-        capabilities_error: capabilitiesResult.reason instanceof Error ? capabilitiesResult.reason.message : String(capabilitiesResult.reason)
-      };
     }
     setStatus('connected');
     scheduleDeviceInfoRefresh();
@@ -962,98 +508,11 @@
   async function onSave() {
     if (!selectedDeviceId) return;
     await runTask(async () => {
-      await saveAndVerify(selectedDeviceId, config);
+      await applyConfig(selectedDeviceId, config);
+      await saveConfig(selectedDeviceId);
+      originalConfig = JSON.parse(JSON.stringify(config));
       setStatus('saved');
     });
-  }
-
-  function isEditingControl() {
-    const active = document.activeElement;
-    return active instanceof HTMLInputElement || active instanceof HTMLSelectElement || active instanceof HTMLTextAreaElement;
-  }
-
-  async function ensureVolumeOverlayWindow() {
-    const existing = await WebviewWindow.getByLabel(volumeOverlayLabel);
-    if (existing) {
-      volumeOverlayWindow = existing;
-      return existing;
-    }
-
-    const overlay = new WebviewWindow(volumeOverlayLabel, {
-      url: '/?overlay=volume',
-      title: '',
-      width: volumeOverlayWidth,
-      height: volumeOverlayHeight,
-      decorations: false,
-      transparent: true,
-      alwaysOnTop: true,
-      resizable: false,
-      focus: false,
-      focusable: false,
-      skipTaskbar: true,
-      shadow: false,
-      visible: false
-    });
-
-    volumeOverlayWindow = overlay;
-    overlay.once('tauri://error', () => {
-      volumeOverlayWindow = null;
-    });
-    await new Promise<void>((resolve) => {
-      overlay.once('tauri://created', () => resolve());
-      window.setTimeout(resolve, 700);
-    });
-    return overlay;
-  }
-
-  async function positionVolumeOverlay(windowRef: WebviewWindow) {
-    try {
-      const monitor = await currentMonitor();
-      if (!monitor) return;
-      const scale = monitor.scaleFactor || 1;
-      const x = monitor.position.x / scale + (monitor.size.width / scale - volumeOverlayWidth) / 2;
-      const monitorTop = monitor.position.y / scale;
-      const monitorHeight = monitor.size.height / scale;
-      const y = monitorTop + monitorHeight - 170;
-      await windowRef.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
-    } catch {
-      // 위치 조정 실패는 오버레이 표시 자체를 막지 않습니다.
-    }
-  }
-
-  async function showVolumeOverlay(volume: number) {
-    try {
-      const overlay = await ensureVolumeOverlayWindow();
-      await positionVolumeOverlay(overlay);
-      await emitTo(volumeOverlayLabel, 'volume-overlay-show', { volume });
-    } catch (error) {
-      addLog(`음량 오버레이 표시 실패: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error');
-    }
-  }
-
-  async function pollExternalSpeakerVolume() {
-    if (volumeOverlayPollBusy || !selectedDeviceId || !isBridgeConnected || !showControllerUi || isBusy || isEditingControl()) {
-      return;
-    }
-
-    volumeOverlayPollBusy = true;
-    const deviceId = selectedDeviceId;
-    try {
-      const nextConfig = await readConfig(deviceId);
-      if (selectedDeviceId !== deviceId) {
-        return;
-      }
-      const nextVolume = Math.max(0, Math.min(100, Math.round(Number(nextConfig.speaker_volume_percent) || 0)));
-      if (Math.abs(nextVolume - lastObservedSpeakerVolume) >= 1) {
-        config = { ...config, speaker_volume_percent: nextVolume };
-        lastObservedSpeakerVolume = nextVolume;
-        await showVolumeOverlay(nextVolume);
-      }
-    } catch {
-      // 오버레이용 폴링 실패는 일반 HID 오류 토스트로 올리지 않습니다.
-    } finally {
-      volumeOverlayPollBusy = false;
-    }
   }
 
   async function onReconnect() {
@@ -1066,106 +525,47 @@
   }
 
   async function onFirmwareUpdate() {
-    showUpdateProgressModal = true;
-    updateStep = 'checking';
-    await runTask(async () => {
-      try {
-        await performFirmwareUpdate({ automatic: false });
-      } catch (error) {
-        updateStep = 'failed';
-        throw error;
-      }
-    });
-    finishUpdateProgressModal();
+    await runTask(() => performFirmwareUpdate({ automatic: false }));
   }
 
   async function onRecoveryFirmwareUpdate() {
-    showUpdateProgressModal = true;
     await runTask(async () => {
       updateStep = 'copying';
       setStatus('updating');
-      let result;
-      try {
-        result = await recoveryFlashLatestDebugFirmware();
-      } catch (error) {
-        updateStep = 'failed';
-        throw error;
-      }
+      const result = await recoveryFlashLatestDebugFirmware(selectedDeviceId || undefined);
       updateStep = 'done';
       addLog(`${text.recoveryFirmwareUpdate}: ${result.version} / ${result.asset_name}`);
       showToast(`${text.status.updated}: ${result.version}`);
       await syncDevicePresence();
-      await verifyUsbPresentationAfterUpdate('recovery');
     });
-    finishUpdateProgressModal();
   }
 
   async function onCalibrationApply(
     side: 'left' | 'right',
-    result: { centerX: number; centerY: number; deadzone: number; minX: number; maxX: number; minY: number; maxY: number }
+    result: { centerX: number; centerY: number; deadzone: number }
   ) {
-    const nextConfig = {
+    config = {
       ...config,
-      config_version: 3,
+      config_version: 5,
       stick_calibration_enabled: true,
       ...(side === 'left'
         ? {
             left_stick_center_x: result.centerX,
             left_stick_center_y: result.centerY,
-            left_stick_deadzone: result.deadzone,
-            left_stick_min_x: result.minX,
-            left_stick_max_x: result.maxX,
-            left_stick_min_y: result.minY,
-            left_stick_max_y: result.maxY
+            left_stick_deadzone: result.deadzone
           }
         : {
             right_stick_center_x: result.centerX,
             right_stick_center_y: result.centerY,
-            right_stick_deadzone: result.deadzone,
-            right_stick_min_x: result.minX,
-            right_stick_max_x: result.maxX,
-            right_stick_min_y: result.minY,
-            right_stick_max_y: result.maxY
+            right_stick_deadzone: result.deadzone
           })
     };
-    config = nextConfig;
 
     if (selectedDeviceId) {
-      await saveAndVerify(selectedDeviceId, nextConfig);
+      await applyConfig(selectedDeviceId, config);
+      await saveConfig(selectedDeviceId);
+      originalConfig = JSON.parse(JSON.stringify(config));
       addLog(text.calibrationDone);
-    }
-  }
-
-  async function onCalibrationClear(side: 'left' | 'right') {
-    const nextConfig = {
-      ...config,
-      stick_calibration_enabled: side === 'left'
-        ? Boolean(config.right_stick_center_x || config.right_stick_center_y || (config.right_stick_deadzone ?? 1) > 1)
-        : Boolean(config.left_stick_center_x || config.left_stick_center_y || (config.left_stick_deadzone ?? 1) > 1),
-      ...(side === 'left'
-        ? {
-            left_stick_center_x: 0,
-            left_stick_center_y: 0,
-            left_stick_deadzone: 1,
-            left_stick_min_x: -1,
-            left_stick_max_x: 1,
-            left_stick_min_y: -1,
-            left_stick_max_y: 1
-          }
-        : {
-            right_stick_center_x: 0,
-            right_stick_center_y: 0,
-            right_stick_deadzone: 1,
-            right_stick_min_x: -1,
-            right_stick_max_x: 1,
-            right_stick_min_y: -1,
-            right_stick_max_y: 1
-          })
-    };
-    config = nextConfig;
-    if (selectedDeviceId) {
-      await saveAndVerify(selectedDeviceId, nextConfig);
-      addLog(text.calibrationCleared);
     }
   }
 
@@ -1193,87 +593,7 @@
     return '';
   }
 
-  async function verifyFirmwareAfterUpdate(deviceId: string, expectedVersion: string) {
-    if (!deviceId) {
-      return false;
-    }
-
-    const summary: {
-      expected_version: string;
-      firmware_version?: string | null;
-      config_version?: number;
-      capabilities?: FirmwareCapabilities | null;
-      errors: string[];
-    } = {
-      expected_version: expectedVersion,
-      errors: []
-    };
-
-    try {
-      const info = await readDeviceInfo(deviceId);
-      deviceInfo = info;
-      rememberTelemetry(info);
-      summary.firmware_version = info.firmware_version;
-      summary.capabilities = info.capabilities ?? null;
-      if (!isCurrentFirmware(expectedVersion)) {
-        summary.errors.push(`firmware_version=${info.firmware_version ?? text.unknown}`);
-      }
-      if (info.capabilities_error) {
-        summary.errors.push(`capabilities=${info.capabilities_error}`);
-      }
-    } catch (error) {
-      summary.errors.push(`device_info=${error instanceof Error ? error.message : text.errorUnknown}`);
-    }
-
-    try {
-      const verifiedConfig = await readConfig(deviceId);
-      config = verifiedConfig;
-      originalConfig = structuredClone(verifiedConfig);
-      summary.config_version = verifiedConfig.config_version;
-    } catch (error) {
-      summary.errors.push(`config=${error instanceof Error ? error.message : text.errorUnknown}`);
-    }
-
-    if (summary.errors.length > 0) {
-      addLog(`${text.updateInstallVerifyFailed}: ${text.viewLogs}`, 'error', summary);
-      showToast(text.updateInstallVerifyFailed, 'error');
-      return false;
-    } else {
-      addLog(`${text.status.updated}: ${expectedVersion}`, 'info', summary);
-      return true;
-    }
-  }
-
-  async function verifyUsbPresentationAfterUpdate(context: string) {
-    await sleep(1200);
-    await syncDevicePresence();
-    if (!selectedDeviceId) {
-      addLog(`${text.usbModeVerifyFailed}: ${text.picoDisconnected}`, 'error', { context });
-      return false;
-    }
-
-    try {
-      const info = await readDeviceInfo(selectedDeviceId);
-      deviceInfo = info;
-      rememberTelemetry(info);
-      const currentDevice = devices.find((device) => device.id === selectedDeviceId);
-      const configOnly = Boolean(currentDevice?.config_only);
-      const modeLabel = configOnly ? text.configOnlyMode : text.picoConnected;
-      if (configOnly && info.controller_connected) {
-        addLog(text.usbModeVerifyNeedsReconnect, 'error', { context, mode: modeLabel, controller_connected: info.controller_connected });
-        showToast(text.usbModeVerifyNeedsReconnect, 'error');
-        return false;
-      }
-
-      addLog(`${text.usbModeVerifyOk}: ${modeLabel}`, 'info', { context, controller_connected: info.controller_connected });
-      return true;
-    } catch (error) {
-      addLog(`${text.usbModeVerifyFailed}: ${error instanceof Error ? error.message : text.errorUnknown}`, 'error', { context });
-      return false;
-    }
-  }
-
-  async function restoreConfigAfterFirmwareUpdate(preservedConfig: BridgeConfig | null, previousDeviceId: string, expectedVersion: string) {
+  async function restoreConfigAfterFirmwareUpdate(preservedConfig: BridgeConfig | null, previousDeviceId: string) {
     if (!preservedConfig || !previousDeviceId) {
       return false;
     }
@@ -1293,14 +613,11 @@
     const deadline = Date.now() + 12000;
     while (Date.now() < deadline) {
       try {
-        await saveAndVerify(restoredDeviceId, preservedConfig);
+        await applyConfig(restoredDeviceId, preservedConfig);
+        await saveConfig(restoredDeviceId);
+        config = JSON.parse(JSON.stringify(preservedConfig));
+        originalConfig = JSON.parse(JSON.stringify(preservedConfig));
         await readAll();
-        const verifiedUpdate = await verifyFirmwareAfterUpdate(restoredDeviceId, expectedVersion);
-        if (!verifiedUpdate) {
-          updateStep = 'failed';
-          statusOverride = '';
-          return false;
-        }
         statusOverride = '';
         addLog(text.settingsRestored);
         return true;
@@ -1320,7 +637,7 @@
     const previousStatus = statusCode;
     const previousOverride = statusOverride;
     const previousDeviceId = selectedDeviceId;
-    const preservedConfig = selectedDeviceId ? structuredClone(config) : null;
+    const preservedConfig = selectedDeviceId ? JSON.parse(JSON.stringify(config)) : null;
     updateStep = preservedConfig ? 'backup' : 'checking';
     if (!options.automatic) {
       setStatus('updateChecking');
@@ -1333,7 +650,7 @@
     updateStep = 'checking';
     const update = await checkDebugFirmwareUpdate();
     if (isCurrentFirmware(update.version)) {
-      updateStep = 'latest';
+      updateStep = 'idle';
       if (options.automatic) {
         statusCode = previousStatus;
         statusOverride = previousOverride;
@@ -1354,21 +671,11 @@
 
     updateStep = selectedDeviceId ? 'bootloader' : 'copying';
     statusOverride = text.updateSteps[updateStep];
-    updateStep = 'copying';
     const result = await flashLatestDebugFirmware(selectedDeviceId || undefined);
-    if (result.expected_bytes !== result.copied_bytes || !result.drive_disappeared) {
-      addLog(
-        `${text.updateCopyVerifyWarning}: ${result.copied_bytes}/${result.expected_bytes}, driveGone=${result.drive_disappeared}`,
-        'error'
-      );
-    }
+    updateStep = 'copying';
     addLog(`${text.status.updated}: ${result.version} / ${result.asset_name}`);
     const shouldRestoreSettings = Boolean(preservedConfig && previousDeviceId);
-    const settingsRestored = await restoreConfigAfterFirmwareUpdate(preservedConfig, previousDeviceId, result.version);
-    if (!shouldRestoreSettings && selectedDeviceId) {
-      await verifyFirmwareAfterUpdate(selectedDeviceId, result.version);
-    }
-    await verifyUsbPresentationAfterUpdate(options.automatic ? 'auto-update' : 'manual-update');
+    const settingsRestored = await restoreConfigAfterFirmwareUpdate(preservedConfig, previousDeviceId);
     if (shouldRestoreSettings && !settingsRestored) {
       if (options.automatic) {
         statusCode = previousStatus;
@@ -1409,47 +716,23 @@
   async function minimizeWindow() {
     await getCurrentWindow().minimize();
   }
-
   async function closeWindow() {
-    if (closeBehavior === 'exit') {
-      await invoke('quit_app');
-      return;
-    }
     await getCurrentWindow().hide();
   }
 </script>
 
-{#if isVolumeOverlayWindow}
-  <div
-    class:visible={overlayVisible}
-    class="volume-osd-shell"
-    role="status"
-    aria-label={text.speakerVolume}
-  >
-    <div class="volume-osd-icon"><Icon name="volume" size={20} /></div>
-    <div class="volume-osd-content">
-      <div class="volume-osd-label">{text.speakerVolume}</div>
-      <div class="volume-osd-meter">
-        <span style={`width: ${overlayVolume}%`}></span>
-      </div>
-    </div>
-    <strong>{overlayVolume}%</strong>
-  </div>
-{:else}
-<main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell" class:modal-open={showInputTesterModal || showSettingsModal || showUpdateProgressModal}>
+<main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell" class:modal-open={showInputTesterModal || showSettingsModal}>
+
   <header class="topbar" data-tauri-drag-region>
-    <div class="toolbar compact-toolbar" data-tauri-drag-region>
-      <div class:connected={showControllerUi} class="status-pill">
-        <span><Icon name="check" size={10} /></span>
-        {showControllerUi ? text.controllerConnected : text.controllerDisconnected}
+    <div class="brand" data-tauri-drag-region>
+      <div class="brand-icon">
+        <img src={appIcon} alt="" />
       </div>
-      <button class="settings-btn" type="button" onclick={() => (showSettingsModal = true)} aria-label={text.settings} title={text.settings}>
-        <Icon name="settings" size={17} />
-      </button>
-      <div class="window-controls compact">
-        <button type="button" aria-label="최소화" title="최소화" onclick={minimizeWindow}>−</button>
-        <button class="close" type="button" aria-label="닫기" title="닫기" onclick={closeWindow}>×</button>
-      </div>
+      <h1 data-tauri-drag-region>DS5 Dongle Config</h1>
+    </div>
+    <div class="window-controls compact">
+      <button type="button" aria-label="최소화" title="최소화" onclick={minimizeWindow}>−</button>
+      <button class="close" type="button" aria-label="닫기" title="닫기" onclick={closeWindow}>×</button>
     </div>
   </header>
 
@@ -1465,21 +748,22 @@
     {devices}
     bind:selectedDeviceId
     {isBusy}
-    isControllerConnected={showControllerUi}
+    {isBridgeConnected}
+    {isControllerConnected}
     {deviceTitle}
     {firmwareLabel}
     {rssiLabel}
-    rssi={displayedRssi}
+    rssi={deviceInfo.rssi}
     {usbVendorLabel}
     {usbSpeedLabel}
     {rssiStatusLabel}
     {batteryLevel}
     {isCharging}
-    {batteryIsStale}
     {text}
     onRefreshDevices={refreshDevices}
     onDeviceChanged={onDeviceChanged}
     onOpenInputTester={() => (showInputTesterModal = true)}
+    onOpenSettings={() => (showSettingsModal = true)}
   />
 
   <div class="main-grid">
@@ -1496,7 +780,7 @@
       isConnected={isBridgeConnected}
       {isBusy}
       {isDirty}
-      statusText={bridgeStatusText}
+      statusText={actionPanelStatusText}
       {updateStepText}
       {text}
       onRead={onRead}
@@ -1513,78 +797,45 @@
     capabilities={firmwareCapabilities}
     onLog={addLog}
     onCalibrationApply={onCalibrationApply}
-    onCalibrationClear={onCalibrationClear}
     bind:isOpen={showInputTesterModal}
   />
   <SettingsModal
     isOpen={showSettingsModal}
     {lang}
     {themeMode}
-    {closeBehavior}
-    isConnected={showControllerUi}
+    isConnected={isBridgeConnected}
     {autoFirmwareUpdate}
-    {appVersion}
+    appVersion={`v${appVersion}`}
     firmwareVersion={settingsFirmwareVersion}
-    versionWarning={versionCompatibilityWarning}
     {releaseChannel}
     {updateRepository}
     configVersion={`v${config.config_version}`}
     {calibrationEnabled}
     {leftCalibrationSummary}
     {rightCalibrationSummary}
-    diagnostics={deviceDiagnostics}
-    {diagnosticChecks}
-    {diagnosticChecksRunning}
     capabilities={firmwareCapabilities}
     logs={diagnosticLogs}
     {text}
     onClose={() => (showSettingsModal = false)}
     onLangChange={handleLangChange}
     onThemeChange={handleThemeChange}
-    onCloseBehaviorChange={handleCloseBehaviorChange}
     onAutoFirmwareUpdateChange={setAutoFirmwareUpdate}
     onResetDefaults={resetToDefaults}
     onRecoveryFirmwareUpdate={onRecoveryFirmwareUpdate}
-    onExportLogs={exportDiagnosticLogs}
-    onRunDiagnostics={runDeviceDiagnosticChecks}
   />
 
-  {#if showUpdateProgressModal}
+  {#if updateStep !== 'idle'}
     <div class="update-progress-overlay" role="presentation">
       <div class="update-progress-modal" role="status" aria-label={text.firmwareUpdateProgress}>
-        <div class="update-progress-head">
-          <h2><Icon name="download" size={18} /> {text.firmwareUpdateProgress}</h2>
-          <p>{text.firmwareUpdateProgressDesc}</p>
-        </div>
-        <div class="update-progress-current">
-          <strong>{updateStepText || text.updateSteps.checking}</strong>
-          <span>{updateProgress}%</span>
-        </div>
+        <h2>{text.firmwareUpdateProgress}</h2>
+        <p>{updateStepText}</p>
         <div class="progress-track"><span style={`width: ${updateProgress}%`}></span></div>
-        <div class="update-progress-asset">
-          {settingsFirmwareVersion} / ds5-bridge-debug-{settingsFirmwareVersion}.uf2
-        </div>
-        <div class="update-step-grid">
-          {#each updateStepOrder as step}
-            <div class:done={getUpdateStepState(step) === 'done'} class:active={getUpdateStepState(step) === 'active'} class="update-step-card">
-              <span>{getUpdateStepMarker(step)}</span>
-              <strong>{text.updateSteps[step]}</strong>
-            </div>
-          {/each}
-        </div>
-        {#if updateStep === 'failed'}
-          <div class="update-progress-actions">
-            <button type="button" onclick={onFirmwareUpdate}>{text.retryUpdate}</button>
-            <button type="button" onclick={onRecoveryFirmwareUpdate}>{text.recoveryFirmwareUpdate}</button>
-            <button type="button" onclick={() => (showSettingsModal = true)}>{text.viewLogs}</button>
-          </div>
-        {/if}
-        <p class="update-progress-footnote">{text.firmwareUpdateProgressFootnote}</p>
+        <strong>{updateProgress}%</strong>
       </div>
     </div>
   {/if}
 
-  {#if showInputTesterModal || showSettingsModal || showUpdateProgressModal}
+  {#if showInputTesterModal || showSettingsModal}
     <!-- 모달이 열린 동안 배경 클릭을 차단합니다. -->
     <div 
       class="global-click-blocker" 
@@ -1594,4 +845,3 @@
     ></div>
   {/if}
 </main>
-{/if}

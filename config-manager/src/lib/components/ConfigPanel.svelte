@@ -3,20 +3,11 @@
   import Icon from '../Icon.svelte';
   import type { BridgeConfig } from '../api';
 
-  // Svelte 5 props.
-  let {
-    config = $bindable(),
-    text,
-    showToast,
-    onLog = () => {}
-  }: {
-    config: BridgeConfig;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    text: any;
-    showToast: (message: string, kind?: 'info' | 'error') => void;
-    onLog?: (message: string, kind?: 'info' | 'error') => void;
-  } = $props();
-
+  export let config: BridgeConfig;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export let text: any;
+  export let showToast: (message: string, kind?: 'info' | 'error') => void;
+  export let onLog: (message: string, kind?: 'info' | 'error') => void = () => {};
 
   // Preset model.
   interface Preset {
@@ -27,29 +18,38 @@
   }
 
   // Local preset state.
-  let customPresets = $state<Preset[]>([]);
-  let selectedPresetId = $state('');
-  let selectedPresetSnapshot = $state('');
-  let isSavingMode = $state(false);
-  let newPresetName = $state('');
-  let importInput = $state<HTMLInputElement | null>(null);
+  let customPresets: Preset[] = [];
+  let selectedPresetId = '';
+  let selectedPresetSnapshot = '';
+  let isSavingMode = false;
+  let newPresetName = '';
+  let importInput: HTMLInputElement | null = null;
 
   // Built-in presets.
-  let builtInPresets = $derived<Preset[]>([
+  $: builtInPresets = [
     {
       id: 'racing',
       name: text.presetRacing,
       isBuiltIn: true,
       config: {
-        config_version: 3,
+        config_version: 5,
         haptics_gain: 2.0,
-        speaker_volume_percent: 30,
-        haptics_buffer_length: 64,
+        speaker_volume_percent: 50,
+        speaker_volume: 50,
+        headset_volume: 50,
+        speaker_gain: 0,
+        audio_buffer_length: 64,
         inactive_time: 10,
         disable_inactive_disconnect: false,
         disable_pico_led: false,
         polling_rate_mode: 2,
         controller_mode: 2,
+        enable_usb_sn: false,
+        ps_shortcut_enabled: false,
+        disable_mic: false,
+        disable_speaker: false,
+        enable_wake: false,
+        trigger_reduce: 0,
         stick_calibration_enabled: false
       }
     },
@@ -58,15 +58,24 @@
       name: text.presetFps,
       isBuiltIn: true,
       config: {
-        config_version: 3,
+        config_version: 5,
         haptics_gain: 0.6,
-        speaker_volume_percent: 0,
-        haptics_buffer_length: 64,
+        speaker_volume_percent: 50,
+        speaker_volume: 50,
+        headset_volume: 50,
+        speaker_gain: 0,
+        audio_buffer_length: 64,
         inactive_time: 10,
         disable_inactive_disconnect: false,
         disable_pico_led: false,
         polling_rate_mode: 2,
         controller_mode: 2,
+        enable_usb_sn: false,
+        ps_shortcut_enabled: false,
+        disable_mic: false,
+        disable_speaker: false,
+        enable_wake: false,
+        trigger_reduce: 0,
         stick_calibration_enabled: false
       }
     },
@@ -75,36 +84,36 @@
       name: text.presetSilent,
       isBuiltIn: true,
       config: {
-        config_version: 3,
+        config_version: 5,
         haptics_gain: 0.3,
-        speaker_volume_percent: 0,
-        haptics_buffer_length: 64,
+        speaker_volume_percent: 50,
+        speaker_volume: 50,
+        headset_volume: 50,
+        speaker_gain: 0,
+        audio_buffer_length: 64,
         inactive_time: 10,
         disable_inactive_disconnect: false,
         disable_pico_led: true,
         polling_rate_mode: 0,
         controller_mode: 0,
+        enable_usb_sn: false,
+        ps_shortcut_enabled: false,
+        disable_mic: false,
+        disable_speaker: false,
+        enable_wake: false,
+        trigger_reduce: 0,
         stick_calibration_enabled: false
       }
     }
-  ]);
+  ] as Preset[];
 
   // Combined preset list.
-  let allPresets = $derived<Preset[]>([...builtInPresets, ...customPresets]);
-  let selectedPreset = $derived(allPresets.find((preset) => preset.id === selectedPresetId) ?? null);
-  let selectedPresetModified = $derived(
-    Boolean(selectedPreset && selectedPresetSnapshot && JSON.stringify(config) !== selectedPresetSnapshot)
-  );
+  $: allPresets = [...builtInPresets, ...customPresets];
+  $: selectedPreset = allPresets.find((preset) => preset.id === selectedPresetId) ?? null;
+  $: selectedPresetModified = Boolean(selectedPreset && selectedPresetSnapshot && JSON.stringify(config) !== selectedPresetSnapshot);
 
   onMount(() => {
     loadCustomPresets();
-  });
-
-  $effect(() => {
-    const roundedSpeakerVolume = Math.round(Number(config.speaker_volume_percent) || 0);
-    if (config.speaker_volume_percent !== roundedSpeakerVolume) {
-      config.speaker_volume_percent = roundedSpeakerVolume;
-    }
   });
 
   // Load custom presets from local storage.
@@ -188,12 +197,11 @@
     return (
       typeof candidate.config_version === 'number' &&
       typeof candidate.haptics_gain === 'number' &&
-      typeof candidate.speaker_volume_percent === 'number' &&
+      typeof candidate.speaker_gain === 'number' &&
       typeof candidate.inactive_time === 'number' &&
-      typeof candidate.disable_inactive_disconnect === 'boolean' &&
       typeof candidate.disable_pico_led === 'boolean' &&
       typeof candidate.polling_rate_mode === 'number' &&
-      typeof candidate.haptics_buffer_length === 'number' &&
+      typeof candidate.audio_buffer_length === 'number' &&
       typeof candidate.controller_mode === 'number'
     );
   }
@@ -240,22 +248,21 @@
 </script>
 
 <section class="config-panel panel-dark">
-  <div class="section-title config-title-row">
-    <div class="config-title-label">
+  <div class="section-title" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+    <div style="display: flex; align-items: center; gap: 8px;">
       <span><Icon name="sliders" size={18} /></span>
       <h2 style="margin: 0;">{text.configuration}</h2>
     </div>
 
     <!-- 프리셋 관리 영역 -->
-    <div class="preset-manager">
+    <div class="preset-manager" style="display: flex; align-items: center; gap: 8px;">
       {#if !isSavingMode}
-        <div class="preset-controls">
+        <div style="display: flex; align-items: center; gap: 6px;">
           <select 
             bind:value={selectedPresetId} 
             onchange={handlePresetChange}
             aria-label={text.presets}
-            title={selectedPreset?.name ?? text.selectPreset}
-            class="preset-select"
+            style="background: var(--control-2); border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; outline: none; cursor: pointer; min-width: 160px; height: 32px;"
           >
             <option value="" style="background: var(--control-2); color: var(--muted);">{text.selectPreset}</option>
             
@@ -274,10 +281,16 @@
             {/if}
           </select>
 
+          {#if selectedPreset}
+            <span class:modified={selectedPresetModified} class="preset-state">
+              {selectedPreset.name}{selectedPresetModified ? ` · ${text.modified}` : ''}
+            </span>
+          {/if}
+
           <button 
             type="button" 
             onclick={() => (isSavingMode = true)}
-            class="preset-save-btn"
+            style="background: rgba(99, 226, 183, 0.1); border: 1px solid rgba(99, 226, 183, 0.25); color: #63e2b7; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 500; cursor: pointer; height: 32px; display: inline-flex; align-items: center; gap: 4px; transition: background 0.15s;"
             onmouseenter={(e) => e.currentTarget.style.background = 'rgba(99, 226, 183, 0.2)'}
             onmouseleave={(e) => e.currentTarget.style.background = 'rgba(99, 226, 183, 0.1)'}
           >
@@ -338,37 +351,12 @@
   </div>
 
   <div class="cards-grid">
-    <section class="config-card">
-      <div class="card-head">
-        <span><Icon name="volume" size={17} /></span>
-        <div>
-          <h3>{text.feedbackTitle}</h3>
-          <p>{text.feedbackDesc}</p>
-        </div>
-      </div>
-      <label class="control-row">
-        <strong>{text.hapticsGain}</strong>
-        <input type="range" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
-        <input type="number" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
-      </label>
-      <label class="control-row">
-        <strong>{text.speakerVolume}</strong>
-        <input type="range" min="0" max="100" step="1" bind:value={config.speaker_volume_percent} />
-        <input type="number" min="0" max="100" step="1" bind:value={config.speaker_volume_percent} />
-      </label>
-      <label class="control-row">
-        <strong>{text.hapticsBuffer}</strong>
-        <input type="range" min="16" max="128" step="1" bind:value={config.haptics_buffer_length} />
-        <input type="number" min="16" max="128" step="1" bind:value={config.haptics_buffer_length} />
-      </label>
-    </section>
-
-    <section class="config-card">
+    <!-- Group 1: Power & Sleep -->
+    <section class="config-card" style="padding-bottom: 6px; gap: 4px;">
       <div class="card-head">
         <span><Icon name="zap" size={17} /></span>
         <div>
           <h3>{text.powerTitle}</h3>
-          <p>{text.powerDesc}</p>
         </div>
       </div>
       <label class="control-row">
@@ -381,124 +369,115 @@
         <input type="checkbox" bind:checked={config.disable_inactive_disconnect} />
       </label>
       <label class="switch-row">
+        <strong>{text.enableWake}</strong>
+        <input type="checkbox" bind:checked={config.enable_wake} />
+      </label>
+      <label class="switch-row">
         <strong>{text.disableLed}</strong>
         <input type="checkbox" bind:checked={config.disable_pico_led} />
       </label>
     </section>
 
-    <section class="config-card compact">
+    <!-- Group 2: Audio & Mic -->
+    <section class="config-card" style="padding-bottom: 6px; gap: 4px;">
       <div class="card-head">
-        <span><Icon name="gauge" size={17} /></span>
+        <span><Icon name="volume" size={17} /></span>
         <div>
-          <h3>{text.performanceTitle}</h3>
-          <p>{text.performanceDesc}</p>
+          <h3>{text.audioTitle}</h3>
         </div>
       </div>
-      <strong class="field-label">{text.pollingMode}</strong>
+      <label class="control-row">
+        <strong>{text.speakerVolume}</strong>
+        <input type="range" min="0" max="100" step="1" bind:value={config.speaker_volume} />
+        <input type="number" min="0" max="100" step="1" bind:value={config.speaker_volume} />
+      </label>
+      <label class="control-row">
+        <strong>{text.speakerGain}</strong>
+        <input type="range" min="0" max="7" step="1" bind:value={config.speaker_gain} />
+        <input type="number" min="0" max="7" step="1" bind:value={config.speaker_gain} />
+      </label>
+      <label class="control-row">
+        <strong>{text.headsetVolume}</strong>
+        <input type="range" min="0" max="100" step="1" bind:value={config.headset_volume} />
+        <input type="number" min="0" max="100" step="1" bind:value={config.headset_volume} />
+      </label>
+      <label class="switch-row">
+        <strong>{text.disableSpeaker}</strong>
+        <input type="checkbox" bind:checked={config.disable_speaker} />
+      </label>
+    </section>
+
+    <!-- Group 3: Haptics & Trigger -->
+    <section class="config-card" style="padding-bottom: 6px; gap: 6px;">
+      <div class="card-head">
+        <span><Icon name="gamepad" size={17} /></span>
+        <div>
+          <h3>{text.hapticsTriggerTitle}</h3>
+        </div>
+      </div>
+      <label class="control-row">
+        <strong>{text.hapticsGain}</strong>
+        <input type="range" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
+        <input type="number" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
+      </label>
+      <label class="control-row">
+        <strong>{text.triggerReduce}</strong>
+        <input type="range" min="0" max="255" step="1" bind:value={config.trigger_reduce} />
+        <input type="number" min="0" max="255" step="1" bind:value={config.trigger_reduce} />
+      </label>
+      <label class="control-row">
+        <strong>{text.hapticsBuffer}</strong>
+        <input type="range" min="16" max="128" step="1" bind:value={config.audio_buffer_length} />
+        <input type="number" min="16" max="128" step="1" bind:value={config.audio_buffer_length} />
+      </label>
+    </section>
+
+    <!-- Group 4: Advanced & System -->
+    <section class="config-card compact" style="padding-bottom: 6px;">
+      <div class="card-head">
+        <span><Icon name="settings" size={17} /></span>
+        <div>
+          <h3>{text.advancedTitle}</h3>
+        </div>
+      </div>
+      <strong class="field-label" style="margin-top: 2px; margin-bottom: 3px;">{text.pollingMode}</strong>
       <div class="seg wide">
         <button class:active={config.polling_rate_mode === 0} type="button" onclick={() => (config.polling_rate_mode = 0)}>250 Hz</button>
         <button class:active={config.polling_rate_mode === 1} type="button" onclick={() => (config.polling_rate_mode = 1)}>500 Hz</button>
         <button class:active={config.polling_rate_mode === 2} type="button" onclick={() => (config.polling_rate_mode = 2)}>{text.realTime}</button>
       </div>
-    </section>
 
-    <section class="config-card compact">
-      <div class="card-head">
-        <span><Icon name="gamepad" size={17} /></span>
-        <div>
-          <h3>{text.compatibilityTitle}</h3>
-          <p>{text.compatibilityDesc}</p>
-        </div>
-      </div>
-      <strong class="field-label">{text.controllerMode}</strong>
+      <strong class="field-label" style="margin-top: 4px; margin-bottom: 3px;">{text.controllerMode}</strong>
       <div class="seg wide">
         <button class:active={config.controller_mode === 0} type="button" onclick={() => (config.controller_mode = 0)}>DS5</button>
         <button class:active={config.controller_mode === 1} type="button" onclick={() => (config.controller_mode = 1)}>DSE</button>
         <button class:active={config.controller_mode === 2} type="button" onclick={() => (config.controller_mode = 2)}>Auto</button>
       </div>
+
+      <label class="switch-row" style="margin-top: auto;">
+        <strong>{text.enableUsbSn}</strong>
+        <input type="checkbox" bind:checked={config.enable_usb_sn} />
+      </label>
+      <label class="switch-row" style="margin-top: 6px;">
+        <strong>{text.psShortcutEnabled}</strong>
+        <input type="checkbox" bind:checked={config.ps_shortcut_enabled} />
+      </label>
     </section>
   </div>
 </section>
 
 <style>
-  .config-title-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: nowrap;
-    gap: 12px;
-    margin-bottom: 20px;
-    min-width: 0;
-  }
-
-  .config-title-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 0 0 auto;
-  }
-
-  .preset-manager {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    flex: 1 1 auto;
-    min-width: 0;
-    margin-left: 18px;
-  }
-
-  .preset-controls {
-    position: relative;
-    display: grid;
-    grid-template-columns: minmax(150px, 238px) 112px 88px 88px;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 6px;
-    min-width: 0;
-    width: 100%;
-  }
-
-  .preset-select {
-    background: var(--control-2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 6px 32px 6px 12px;
-    border-radius: 6px;
-    font-size: 0.8rem;
-    outline: none;
-    cursor: pointer;
-    width: 100%;
-    min-width: 150px;
-    max-width: none;
-    height: 32px;
+  .preset-state {
+    max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    grid-column: 1;
+    color: var(--muted);
+    font-size: 0.76rem;
   }
 
-  .preset-save-btn {
-    background: rgba(99, 226, 183, 0.1);
-    border: 1px solid rgba(99, 226, 183, 0.25);
-    color: #63e2b7;
-    padding: 6px 8px;
-    border-radius: 6px;
-    font-size: 0.8rem;
-    font-weight: 500;
-    cursor: pointer;
-    height: 32px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    transition: background 0.15s;
-    white-space: nowrap;
-    flex: 0 0 auto;
-    min-width: 0;
-    grid-column: 2;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .preset-state.modified {
+    color: #ffab00;
   }
 
   .preset-tool-btn {
@@ -513,22 +492,8 @@
     height: 32px;
     display: inline-flex;
     align-items: center;
-    justify-content: center;
     gap: 4px;
     transition: filter 0.15s;
-    white-space: nowrap;
-    flex: 0 0 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .preset-tool-btn:nth-of-type(2) {
-    grid-column: 3;
-  }
-
-  .preset-tool-btn:nth-of-type(3) {
-    grid-column: 4;
   }
 
   .preset-tool-btn:hover {
