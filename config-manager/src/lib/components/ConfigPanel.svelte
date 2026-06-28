@@ -34,7 +34,6 @@
       config: {
         config_version: 5,
         haptics_gain: 2.0,
-        speaker_volume_percent: 50,
         speaker_volume: 50,
         headset_volume: 50,
         speaker_gain: 0,
@@ -60,7 +59,6 @@
       config: {
         config_version: 5,
         haptics_gain: 0.6,
-        speaker_volume_percent: 50,
         speaker_volume: 50,
         headset_volume: 50,
         speaker_gain: 0,
@@ -86,7 +84,6 @@
       config: {
         config_version: 5,
         haptics_gain: 0.3,
-        speaker_volume_percent: 50,
         speaker_volume: 50,
         headset_volume: 50,
         speaker_gain: 0,

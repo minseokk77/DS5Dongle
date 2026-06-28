@@ -14,7 +14,6 @@ export interface BridgeDevice {
 export interface BridgeConfig {
   config_version: number;
   haptics_gain: number;
-  speaker_volume_percent: number; // old?
   speaker_volume: number;
   headset_volume: number;
   speaker_gain: number;
@@ -51,7 +50,6 @@ export const defaultConfig: BridgeConfig = {
   config_version: 5,
   haptics_gain: 1,
   speaker_volume: 50,
-  speaker_volume_percent: 50,
   headset_volume: 50,
   speaker_gain: 0,
   inactive_time: 10,
@@ -141,10 +139,12 @@ export async function applyConfig(deviceId: string, config: BridgeConfig): Promi
         (safeConfig as any)[key] = (defaultConfig as any)[key];
       }
     }
-    // Backward compatibility if Svelte only sent speaker_volume_percent
-    if (safeConfig.speaker_volume === undefined || safeConfig.speaker_volume === null) {
-      safeConfig.speaker_volume = safeConfig.speaker_volume_percent ?? 50;
+
+    // Strip out speaker_volume_percent so Rust doesn't panic on duplicate fields
+    if ('speaker_volume_percent' in safeConfig) {
+      delete (safeConfig as any).speaker_volume_percent;
     }
+
     await invoke('apply_config', { deviceId, config: safeConfig });
   } catch (error) {
     throw friendlyError(error, '설정을 장치에 적용하지 못했습니다.');
