@@ -32,24 +32,30 @@
       name: text.presetRacing,
       isBuiltIn: true,
       config: {
-        config_version: 5,
+        config_version: 1,
         haptics_gain: 2.0,
-        speaker_volume: 50,
-        headset_volume: 50,
-        speaker_gain: 0,
+        speaker_volume_percent: 50,
         audio_buffer_length: 64,
         inactive_time: 10,
         disable_inactive_disconnect: false,
         disable_pico_led: false,
         polling_rate_mode: 2,
-        controller_mode: 2,
-        enable_usb_sn: false,
-        ps_shortcut_enabled: false,
-        disable_mic: false,
-        disable_speaker: false,
-        enable_wake: false,
-        trigger_reduce: 0,
-        stick_calibration_enabled: false
+        controller_mode: 0,
+        stick_calibration_enabled: false,
+        left_stick_center_x: 0,
+        left_stick_center_y: 0,
+        left_stick_deadzone: 0,
+        right_stick_center_x: 0,
+        right_stick_center_y: 0,
+        right_stick_deadzone: 0,
+        left_stick_min_x: 0,
+        left_stick_max_x: 0,
+        left_stick_min_y: 0,
+        left_stick_max_y: 0,
+        right_stick_min_x: 0,
+        right_stick_max_x: 0,
+        right_stick_min_y: 0,
+        right_stick_max_y: 0
       }
     },
     {
@@ -57,24 +63,30 @@
       name: text.presetFps,
       isBuiltIn: true,
       config: {
-        config_version: 5,
+        config_version: 1,
         haptics_gain: 0.6,
-        speaker_volume: 50,
-        headset_volume: 50,
-        speaker_gain: 0,
+        speaker_volume_percent: 50,
         audio_buffer_length: 64,
         inactive_time: 10,
         disable_inactive_disconnect: false,
         disable_pico_led: false,
         polling_rate_mode: 2,
-        controller_mode: 2,
-        enable_usb_sn: false,
-        ps_shortcut_enabled: false,
-        disable_mic: false,
-        disable_speaker: false,
-        enable_wake: false,
-        trigger_reduce: 0,
-        stick_calibration_enabled: false
+        controller_mode: 0,
+        stick_calibration_enabled: false,
+        left_stick_center_x: 0,
+        left_stick_center_y: 0,
+        left_stick_deadzone: 0,
+        right_stick_center_x: 0,
+        right_stick_center_y: 0,
+        right_stick_deadzone: 0,
+        left_stick_min_x: 0,
+        left_stick_max_x: 0,
+        left_stick_min_y: 0,
+        left_stick_max_y: 0,
+        right_stick_min_x: 0,
+        right_stick_max_x: 0,
+        right_stick_min_y: 0,
+        right_stick_max_y: 0
       }
     },
     {
@@ -82,24 +94,30 @@
       name: text.presetSilent,
       isBuiltIn: true,
       config: {
-        config_version: 5,
+        config_version: 1,
         haptics_gain: 0.3,
-        speaker_volume: 50,
-        headset_volume: 50,
-        speaker_gain: 0,
+        speaker_volume_percent: 50,
         audio_buffer_length: 64,
         inactive_time: 10,
         disable_inactive_disconnect: false,
         disable_pico_led: true,
         polling_rate_mode: 0,
         controller_mode: 0,
-        enable_usb_sn: false,
-        ps_shortcut_enabled: false,
-        disable_mic: false,
-        disable_speaker: false,
-        enable_wake: false,
-        trigger_reduce: 0,
-        stick_calibration_enabled: false
+        stick_calibration_enabled: false,
+        left_stick_center_x: 0,
+        left_stick_center_y: 0,
+        left_stick_deadzone: 0,
+        right_stick_center_x: 0,
+        right_stick_center_y: 0,
+        right_stick_deadzone: 0,
+        left_stick_min_x: 0,
+        left_stick_max_x: 0,
+        left_stick_min_y: 0,
+        left_stick_max_y: 0,
+        right_stick_min_x: 0,
+        right_stick_max_x: 0,
+        right_stick_min_y: 0,
+        right_stick_max_y: 0
       }
     }
   ] as Preset[];
@@ -194,7 +212,7 @@
     return (
       typeof candidate.config_version === 'number' &&
       typeof candidate.haptics_gain === 'number' &&
-      typeof candidate.speaker_gain === 'number' &&
+      typeof candidate.speaker_volume_percent === 'number' &&
       typeof candidate.inactive_time === 'number' &&
       typeof candidate.disable_pico_led === 'boolean' &&
       typeof candidate.polling_rate_mode === 'number' &&
@@ -385,22 +403,8 @@
       </div>
       <label class="control-row">
         <strong>{text.speakerVolume}</strong>
-        <input type="range" min="0" max="100" step="1" bind:value={config.speaker_volume} />
-        <input type="number" min="0" max="100" step="1" bind:value={config.speaker_volume} />
-      </label>
-      <label class="control-row">
-        <strong>{text.speakerGain}</strong>
-        <input type="range" min="0" max="7" step="1" bind:value={config.speaker_gain} />
-        <input type="number" min="0" max="7" step="1" bind:value={config.speaker_gain} />
-      </label>
-      <label class="control-row">
-        <strong>{text.headsetVolume}</strong>
-        <input type="range" min="0" max="100" step="1" bind:value={config.headset_volume} />
-        <input type="number" min="0" max="100" step="1" bind:value={config.headset_volume} />
-      </label>
-      <label class="switch-row">
-        <strong>{text.disableSpeaker}</strong>
-        <input type="checkbox" bind:checked={config.disable_speaker} />
+        <input type="range" min="0" max="100" step="1" bind:value={config.speaker_volume_percent} />
+        <input type="number" min="0" max="100" step="1" bind:value={config.speaker_volume_percent} />
       </label>
     </section>
 
@@ -416,11 +420,6 @@
         <strong>{text.hapticsGain}</strong>
         <input type="range" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
         <input type="number" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
-      </label>
-      <label class="control-row">
-        <strong>{text.triggerReduce}</strong>
-        <input type="range" min="0" max="255" step="1" bind:value={config.trigger_reduce} />
-        <input type="number" min="0" max="255" step="1" bind:value={config.trigger_reduce} />
       </label>
       <label class="control-row">
         <strong>{text.hapticsBuffer}</strong>
@@ -450,15 +449,6 @@
         <button class:active={config.controller_mode === 1} type="button" onclick={() => (config.controller_mode = 1)}>DSE</button>
         <button class:active={config.controller_mode === 2} type="button" onclick={() => (config.controller_mode = 2)}>Auto</button>
       </div>
-
-      <label class="switch-row" style="margin-top: 12px;">
-        <strong>{text.enableUsbSn}</strong>
-        <input type="checkbox" bind:checked={config.enable_usb_sn} />
-      </label>
-      <label class="switch-row" style="margin-top: 10px;">
-        <strong>{text.psShortcutEnabled}</strong>
-        <input type="checkbox" bind:checked={config.ps_shortcut_enabled} />
-      </label>
     </section>
   </div>
 </section>

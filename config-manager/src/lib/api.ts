@@ -14,58 +14,42 @@ export interface BridgeDevice {
 export interface BridgeConfig {
   config_version: number;
   haptics_gain: number;
-  speaker_volume: number;
-  headset_volume: number;
-  speaker_gain: number;
+  speaker_volume_percent: number;
   inactive_time: number;
   disable_inactive_disconnect: boolean;
   disable_pico_led: boolean;
   polling_rate_mode: PollingRateMode;
   audio_buffer_length: number;
   controller_mode: ControllerMode;
-  disable_mic: boolean;
-  disable_speaker: boolean;
-  enable_wake: boolean;
-  trigger_reduce: number;
-  enable_usb_sn: boolean;
-  ps_shortcut_enabled: boolean;
-  stick_calibration_enabled?: boolean;
-  left_stick_center_x?: number;
-  left_stick_center_y?: number;
-  left_stick_deadzone?: number;
-  right_stick_center_x?: number;
-  right_stick_center_y?: number;
-  right_stick_deadzone?: number;
-  left_stick_min_x?: number;
-  left_stick_max_x?: number;
-  left_stick_min_y?: number;
-  left_stick_max_y?: number;
-  right_stick_min_x?: number;
-  right_stick_max_x?: number;
-  right_stick_min_y?: number;
-  right_stick_max_y?: number;
+  stick_calibration_enabled: boolean;
+  left_stick_center_x: number;
+  left_stick_center_y: number;
+  left_stick_deadzone: number;
+  right_stick_center_x: number;
+  right_stick_center_y: number;
+  right_stick_deadzone: number;
+  left_stick_min_x: number;
+  left_stick_max_x: number;
+  left_stick_min_y: number;
+  left_stick_max_y: number;
+  right_stick_min_x: number;
+  right_stick_max_x: number;
+  right_stick_min_y: number;
+  right_stick_max_y: number;
 }
 
 export const defaultConfig: BridgeConfig = {
-  config_version: 5,
-  haptics_gain: 1,
-  speaker_volume: 50,
-  headset_volume: 50,
-  speaker_gain: 0,
+  config_version: 1,
+  haptics_gain: 1.0,
+  speaker_volume_percent: 50,
   inactive_time: 10,
   disable_inactive_disconnect: false,
   disable_pico_led: false,
   polling_rate_mode: 2,
   audio_buffer_length: 64,
   controller_mode: 0,
-  enable_usb_sn: false,
-  ps_shortcut_enabled: false,
-  disable_mic: false,
-  disable_speaker: false,
-  enable_wake: false,
-  trigger_reduce: 0,
   stick_calibration_enabled: false,
-  left_stick_center_x: 0,
+  left_stick_center_x: 0.0,
   left_stick_center_y: 0,
   left_stick_deadzone: 0,
   right_stick_center_x: 0,
