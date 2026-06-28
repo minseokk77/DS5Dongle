@@ -573,8 +573,11 @@ fn read_feature_string(device: &HidDevice, report_id: u8) -> Result<Option<Strin
         return Ok(None);
     }
 
-    let value = String::from_utf8_lossy(&buffer[1..len])
-        .trim_matches(char::from(0))
+    // Find the first null byte, or use the entire slice if no null byte is found
+    let payload = &buffer[1..len];
+    let null_pos = payload.iter().position(|&b| b == 0).unwrap_or(payload.len());
+    
+    let value = String::from_utf8_lossy(&payload[..null_pos])
         .trim()
         .to_string();
 
