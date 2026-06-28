@@ -352,7 +352,7 @@
 
   <div class="cards-grid">
     <!-- Group 1: Power & Sleep -->
-    <section class="config-card" style="padding-bottom: 6px; gap: 4px;">
+    <section class="config-card" style="padding-bottom: 6px;">
       <div class="card-head">
         <span><Icon name="zap" size={17} /></span>
         <div>
@@ -379,7 +379,7 @@
     </section>
 
     <!-- Group 2: Audio & Mic -->
-    <section class="config-card" style="padding-bottom: 6px; gap: 4px;">
+    <section class="config-card" style="padding-bottom: 6px;">
       <div class="card-head">
         <span><Icon name="volume" size={17} /></span>
         <div>
@@ -408,7 +408,7 @@
     </section>
 
     <!-- Group 3: Haptics & Trigger -->
-    <section class="config-card" style="padding-bottom: 6px; gap: 6px;">
+    <section class="config-card" style="padding-bottom: 6px;">
       <div class="card-head">
         <span><Icon name="gamepad" size={17} /></span>
         <div>
@@ -454,11 +454,11 @@
         <button class:active={config.controller_mode === 2} type="button" onclick={() => (config.controller_mode = 2)}>Auto</button>
       </div>
 
-      <label class="switch-row" style="margin-top: auto;">
+      <label class="switch-row" style="margin-top: 12px;">
         <strong>{text.enableUsbSn}</strong>
         <input type="checkbox" bind:checked={config.enable_usb_sn} />
       </label>
-      <label class="switch-row" style="margin-top: 6px;">
+      <label class="switch-row" style="margin-top: 10px;">
         <strong>{text.psShortcutEnabled}</strong>
         <input type="checkbox" bind:checked={config.ps_shortcut_enabled} />
       </label>

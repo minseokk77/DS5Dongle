@@ -280,10 +280,10 @@ select { height: 36px; max-width: 260px; color: var(--text); background: var(--c
 .section-title { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .section-title h2 { margin: 0; font-size: 1rem; font-weight: 800; }
 .section-title span { display: grid; place-items: center; color: var(--text); }
-.cards-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr; align-content: stretch; gap: 8px; flex-grow: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.cards-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr auto; align-content: stretch; gap: 8px; flex-grow: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
 .config-card { background: var(--panel-soft); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; justify-content: flex-start; box-shadow: var(--card-shadow); overflow: hidden; height: auto; break-inside: avoid; }
 .config-card:not(.compact) {
-  gap: 6px;
+  gap: 12px;
 }
 .card-head { min-height: 32px; display: flex; gap: 9px; align-items: flex-start; margin-bottom: 6px; }
 .config-card:not(.compact) .card-head { min-height: 32px; margin-bottom: -4px; }

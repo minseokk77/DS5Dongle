@@ -1,8 +1,8 @@
 [usb]
 sony_vendor_id = 0x054c
 product_ids = [0x0ce6, 0x0df2]
-config_vendor_id = 0x1209
-config_product_ids = [0xd5c0]
+config_only_vendor_id = 0x1209
+config_only_product_id = 0xd5c0
 
 [reports]
 config_read = 0xf7
@@ -13,7 +13,7 @@ battery = 0xf5
 capabilities = 0xfa
 
 [config]
-version = 3
+version = 5
 body_length = 30
 haptics_gain_min = 0.1
 haptics_gain_max = 2.0
