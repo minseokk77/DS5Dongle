@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "ds5-bridge-config-tauri"
-version = "0.0.215"
+version = "0.0.216"
 dependencies = [
  "hidapi",
  "lazy_static",
