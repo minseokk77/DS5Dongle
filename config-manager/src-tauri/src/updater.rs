@@ -193,22 +193,15 @@ pub async fn flash_latest_debug_firmware(
     };
     
     let target = Path::new(&drive).join(&update.asset_name);
-    // [TEMPORARY] Use the locally compiled firmware file on the Desktop!
-    let local_firmware_path = "C:\\Users\\minse\\Desktop\\ds5-bridge-debug.uf2";
-    if Path::new(local_firmware_path).exists() {
-        let bytes = fs::read(local_firmware_path)?;
-        fs::write(&target, bytes)?;
-    } else {
-        // Fallback to github download
-        let response = github_client()
-            .get(&update.download_url)
-            .send()
-            .await?
-            .error_for_status()?;
-            
-        let bytes = response.bytes().await?;
-        fs::write(&target, bytes)?;
-    }
+    
+    let response = github_client()
+        .get(&update.download_url)
+        .send()
+        .await?
+        .error_for_status()?;
+        
+    let bytes = response.bytes().await?;
+    fs::write(&target, bytes)?;
 
     Ok(FirmwareFlashResult {
         version: update.version,
