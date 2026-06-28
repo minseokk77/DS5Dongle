@@ -15,8 +15,8 @@ pub struct AppSettings {
 pub struct UsbSettings {
     pub sony_vendor_id: u16,
     pub product_ids: Vec<u16>,
-    pub config_vendor_id: u16,
-    pub config_product_ids: Vec<u16>,
+    pub config_only_vendor_id: u16,
+    pub config_only_product_id: u16,
 }
 
 #[derive(Clone, Debug, Deserialize)]

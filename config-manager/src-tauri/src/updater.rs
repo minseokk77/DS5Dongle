@@ -45,11 +45,12 @@ pub struct FirmwareFlashResult {
     pub version: String,
     pub asset_name: String,
     pub drive: String,
-    pub copied_bytes: u64,
-    pub expected_bytes: u64,
-    pub drive_disappeared: bool,
-    pub reconnected: bool,
-    pub restored_settings: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BootloaderStatus {
+    pub available: bool,
+    pub drive: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,37 +111,41 @@ pub async fn flash_latest_debug_firmware(
         Some(drive) => drive,
         None => {
             if let Some(device_id) = device_id.as_deref().filter(|value| !value.is_empty()) {
-                bridge::enter_bootloader(device_id)?;
-                wait_for_bootloader_drive(Duration::from_secs(18))?
+                let device_id = device_id.to_owned();
+                // 1200 bps baud rate reset (Standard Pico SDK BOOTSEL trigger)
+                let _ = tauri::async_runtime::spawn_blocking(move || {
+                    trigger_picoboot_reset();
+                    let _ = bridge::enter_bootloader(&device_id);
+                }).await;
+                wait_for_bootloader_drive(Duration::from_secs(30)).await?
             } else {
                 return Err(UpdateError::BootDriveNotFound);
             }
         }
     };
     
-    let response = github_client()
-        .get(&update.download_url)
-        .send()
-        .await?
-        .error_for_status()?;
-        
-    let bytes = response.bytes().await?;
-    let expected_bytes = bytes.len() as u64;
-
     let target = Path::new(&drive).join(&update.asset_name);
-    fs::write(&target, bytes)?;
-    let copied_bytes = fs::metadata(&target)?.len();
-    let drive_disappeared = wait_for_bootloader_drive_gone(&drive, Duration::from_secs(18));
+    // [TEMPORARY] Use the locally compiled firmware file on the Desktop!
+    let local_firmware_path = "C:\\Users\\minse\\Desktop\\ds5-bridge-debug.uf2";
+    if Path::new(local_firmware_path).exists() {
+        let bytes = fs::read(local_firmware_path)?;
+        fs::write(&target, bytes)?;
+    } else {
+        // Fallback to github download
+        let response = github_client()
+            .get(&update.download_url)
+            .send()
+            .await?
+            .error_for_status()?;
+            
+        let bytes = response.bytes().await?;
+        fs::write(&target, bytes)?;
+    }
 
     Ok(FirmwareFlashResult {
         version: update.version,
         asset_name: update.asset_name,
         drive,
-        copied_bytes,
-        expected_bytes,
-        drive_disappeared,
-        reconnected: false,
-        restored_settings: false,
     })
 }
 
@@ -281,8 +286,16 @@ fn wide_null(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain([0]).collect()
 }
 
-pub async fn recovery_flash_latest_debug_firmware() -> Result<FirmwareFlashResult, UpdateError> {
-    flash_latest_debug_firmware(None).await
+pub fn bootloader_status() -> Result<BootloaderStatus, UpdateError> {
+    let drive = find_bootloader_drive_optional()?;
+    Ok(BootloaderStatus {
+        available: drive.is_some(),
+        drive,
+    })
+}
+
+pub async fn recovery_flash_latest_debug_firmware(device_id: Option<String>) -> Result<FirmwareFlashResult, UpdateError> {
+    flash_latest_debug_firmware(device_id).await
 }
 
 fn github_client() -> reqwest::Client {
@@ -303,28 +316,17 @@ fn find_bootloader_drive_optional() -> Result<Option<String>, UpdateError> {
     Ok(None)
 }
 
-fn wait_for_bootloader_drive(timeout: Duration) -> Result<String, UpdateError> {
+async fn wait_for_bootloader_drive(timeout: Duration) -> Result<String, UpdateError> {
     let deadline = Instant::now() + timeout;
     loop {
-        if let Some(drive) = find_bootloader_drive_optional()? {
+        if let Some(drive) = tauri::async_runtime::spawn_blocking(find_bootloader_drive_optional).await.unwrap()? {
             return Ok(drive);
         }
         if Instant::now() >= deadline {
             return Err(UpdateError::BootDriveNotFound);
         }
-        thread::sleep(Duration::from_millis(350));
+        tokio::time::sleep(Duration::from_millis(350)).await;
     }
-}
-
-fn wait_for_bootloader_drive_gone(drive: &str, timeout: Duration) -> bool {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if !Path::new(drive).exists() {
-            return true;
-        }
-        thread::sleep(Duration::from_millis(350));
-    }
-    false
 }
 
 /// Windows API를 사용하여 주어진 Volume Label에 해당하는 드라이브 경로를 찾습니다.
@@ -364,4 +366,19 @@ fn find_drive_by_label(label: &str) -> Result<Option<String>, UpdateError> {
     }
 
     Ok(None)
+}
+
+fn trigger_picoboot_reset() {
+    if let Ok(ports) = serialport::available_ports() {
+        for port in ports {
+            if let serialport::SerialPortType::UsbPort(info) = &port.port_type {
+                // 0x054C (Sony), 0x2E8A (Raspberry Pi Pico)
+                if info.vid == 0x054C || info.vid == 0x2E8A {
+                    let _ = serialport::new(&port.port_name, 1200)
+                        .timeout(Duration::from_millis(100))
+                        .open();
+                }
+            }
+        }
+    }
 }
