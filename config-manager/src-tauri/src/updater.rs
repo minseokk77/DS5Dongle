@@ -133,7 +133,20 @@ pub async fn check_app_update(current_version: &str) -> Result<Option<AppUpdateI
     };
 
     if let Some(latest) = releases.into_iter().filter(|r| !r.draft).next() {
-        if latest.tag_name != current_v {
+        let tag = &latest.tag_name;
+        // Map v0.0.x.y to v0.0.xy for comparison
+        let normalized_tag = if tag.starts_with("v0.0.") {
+            let parts: Vec<&str> = tag.split('.').collect();
+            if parts.len() == 4 {
+                format!("v0.0.{}{}", parts[2], parts[3])
+            } else {
+                tag.clone()
+            }
+        } else {
+            tag.clone()
+        };
+
+        if normalized_tag != current_v {
             if let Some(asset) = latest.assets.into_iter().find(|a| {
                 let name = a.name.to_ascii_lowercase();
                 name.ends_with(".exe") && name.contains("setup")
@@ -164,6 +177,7 @@ pub async fn install_app_update(download_url: &str) -> Result<(), UpdateError> {
     fs::write(&target, bytes)?;
     
     std::process::Command::new(&target)
+        .arg("/S")
         .spawn()?;
         
     // Exit current app so installer can overwrite files

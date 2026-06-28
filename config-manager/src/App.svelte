@@ -133,7 +133,15 @@
 
   onMount(() => {
     getVersion().then(v => {
-      appVersion = v;
+      let displayVersion = v;
+      if (v.startsWith('0.0.') && v.length >= 6) {
+        // e.g. 0.0.214 -> 0.0.2.14
+        displayVersion = `0.0.${v[4]}.${v.slice(5)}`;
+      } else if (v.startsWith('0.0.') && v.length === 5) {
+        // e.g. 0.0.14 -> 0.0.1.4
+        displayVersion = `0.0.${v[4]}.${v.slice(5)}`;
+      }
+      appVersion = displayVersion;
       checkAppUpdate(v).then(info => {
         appUpdate = info;
         if (info) {
