@@ -18,7 +18,9 @@ pub struct BridgeDevice {
 pub struct BridgeConfig {
     pub config_version: u8,
     pub haptics_gain: f32,
+    #[serde(alias = "speaker_volume_percent", default = "default_volume")]
     pub speaker_volume: u8,
+    #[serde(default = "default_volume")]
     pub headset_volume: u8,
     pub speaker_gain: u8,
     pub inactive_time: u8,
@@ -627,6 +629,10 @@ fn write_i16_scaled(out: &mut [u8], offset: usize, value: f32, scale: f32) {
 
 fn default_stick_deadzone() -> f32 {
     1.0
+}
+
+fn default_volume() -> u8 {
+    50
 }
 
 fn default_stick_min() -> f32 {
