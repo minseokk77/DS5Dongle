@@ -12,20 +12,26 @@ pub struct BridgeDevice {
     pub vendor_id: u16,
     pub product_id: u16,
     pub serial_number: Option<String>,
-    pub config_only: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BridgeConfig {
     pub config_version: u8,
     pub haptics_gain: f32,
-    pub speaker_volume_percent: f32,
+    pub speaker_volume: u8,
+    pub headset_volume: u8,
+    pub speaker_gain: u8,
     pub inactive_time: u8,
-    pub disable_inactive_disconnect: bool,
     pub disable_pico_led: bool,
     pub polling_rate_mode: u8,
-    pub haptics_buffer_length: u8,
+    pub audio_buffer_length: u8,
     pub controller_mode: u8,
+    pub enable_usb_sn: bool,
+    pub ps_shortcut_enabled: bool,
+    pub disable_mic: bool,
+    pub disable_speaker: bool,
+    pub enable_wake: bool,
+    pub trigger_reduce: u8,
     #[serde(default)]
     pub stick_calibration_enabled: bool,
     #[serde(default)]
@@ -62,37 +68,14 @@ pub struct BridgeConfig {
 pub struct DeviceInfo {
     pub firmware_version: Option<String>,
     pub rssi: Option<i8>,
-    pub capabilities: Option<FirmwareCapabilities>,
     pub firmware_error: Option<String>,
     pub rssi_error: Option<String>,
-    pub capabilities_error: Option<String>,
     pub usb_vendor_name: String,
     pub usb_speed_class: String,
     pub rssi_strength_label: String,
     pub battery_level: Option<u8>,
     pub is_charging: Option<bool>,
-    pub dongle_connected: bool,
     pub controller_connected: bool,
-    pub battery_report_available: bool,
-    pub rssi_report_available: bool,
-    pub config_readable: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct FirmwareCapabilities {
-    pub protocol_version: u8,
-    pub config_version: u8,
-    pub config_body_length: u8,
-    pub build_channel: Option<String>,
-    pub controller_connected: Option<bool>,
-    pub feature_flags: u32,
-    pub supports_battery: bool,
-    pub supports_rssi: bool,
-    pub supports_vibration_test: bool,
-    pub supports_adaptive_trigger: bool,
-    pub supports_bootloader_command: bool,
-    pub supports_stick_calibration: bool,
-    pub supports_directional_stick_calibration: bool,
 }
 
 #[derive(Debug, Error)]
@@ -114,42 +97,90 @@ impl serde::Serialize for BridgeError {
     }
 }
 
+lazy_static::lazy_static! {
+    pub static ref DEVICE_CACHE: std::sync::Mutex<Vec<BridgeDevice>> = std::sync::Mutex::new(Vec::new());
+    static ref HID_API: std::sync::Mutex<Option<HidApi>> = std::sync::Mutex::new(None);
+}
+
+fn with_hid_api<T, F>(f: F) -> Result<T, BridgeError>
+where
+    F: FnOnce(&mut HidApi) -> Result<T, BridgeError>,
+{
+    let mut api_guard = HID_API.lock().unwrap();
+    if api_guard.is_none() {
+        *api_guard = Some(HidApi::new().map_err(|e| BridgeError::HidInit(e.to_string()))?);
+    }
+    let api = api_guard.as_mut().unwrap();
+    f(api)
+}
+
 pub fn list_devices() -> Result<Vec<BridgeDevice>, BridgeError> {
+    Ok(DEVICE_CACHE.lock().unwrap().clone())
+}
+
+pub fn refresh_device_list() -> Result<Vec<BridgeDevice>, BridgeError> {
     let settings = settings();
-    let api = HidApi::new().map_err(|error| BridgeError::HidInit(error.to_string()))?;
+    
+    with_hid_api(|api| {
+        api.refresh_devices().map_err(|e| BridgeError::HidInit(e.to_string()))?;
+        
+        Ok(api
+            .device_list()
+            .filter(|device| {
+                let is_match = (device.vendor_id() == settings.usb.sony_vendor_id
+                    && settings.usb.product_ids.contains(&device.product_id()))
+                || (device.vendor_id() == settings.usb.config_only_vendor_id
+                    && device.product_id() == settings.usb.config_only_product_id);
+                if is_match {
+                    eprintln!("[DEBUG] filter kept device: {:04X}:{:04X} at {:?}", device.vendor_id(), device.product_id(), device.path());
+                } else {
+                    if device.vendor_id() == 0x054c || device.vendor_id() == 0x1209 {
+                        eprintln!("[DEBUG] filter REJECTED device: {:04X}:{:04X} at {:?}", device.vendor_id(), device.product_id(), device.path());
+                    }
+                }
+                is_match
+            })
+            .map(|device| {
+                let product = device.product_string().unwrap_or("Unknown HID");
+                let manufacturer = device.manufacturer_string().unwrap_or("Unknown manufacturer");
+                let serial = device.serial_number().map(ToOwned::to_owned);
+                let product_id = device.product_id();
+                let serial_label = serial
+                    .as_ref()
+                    .filter(|value| !value.is_empty())
+                    .map(|value| Cow::Owned(format!(" - {value}")))
+                    .unwrap_or(Cow::Borrowed(""));
 
-    Ok(api
-        .device_list()
-        .filter(|device| {
-            (device.vendor_id() == settings.usb.sony_vendor_id
-                && settings.usb.product_ids.contains(&device.product_id()))
-                || (device.vendor_id() == settings.usb.config_vendor_id
-                    && settings.usb.config_product_ids.contains(&device.product_id()))
-        })
-        .map(|device| {
-            let product = device.product_string().unwrap_or("Unknown HID");
-            let manufacturer = device.manufacturer_string().unwrap_or("Unknown manufacturer");
-            let serial = device.serial_number().map(ToOwned::to_owned);
-            let product_id = device.product_id();
-            let serial_label = serial
-                .as_ref()
-                .filter(|value| !value.is_empty())
-                .map(|value| Cow::Owned(format!(" - {value}")))
-                .unwrap_or(Cow::Borrowed(""));
+                BridgeDevice {
+                    id: device.path().to_string_lossy().to_string(),
+                    label: format!("{product} - {manufacturer} - PID {product_id:04x}{serial_label}"),
+                    vendor_id: device.vendor_id(),
+                    product_id,
+                    serial_number: serial,
+                }
+            })
+            .collect())
+    })
+}
 
-            let config_only = device.vendor_id() == settings.usb.config_vendor_id
-                && settings.usb.config_product_ids.contains(&product_id);
+pub fn write_config(device_id: &str, config: &[u8]) -> Result<(), BridgeError> {
+    let settings = settings();
+    let device = open_device(device_id)?;
+    
+    // 1. Update config in variable (command 0x01)
+    let mut report = vec![0_u8; config.len() + 2];
+    report[0] = settings.reports.command;
+    report[1] = 0x01; // CMD: update config in variable
+    report[2..].copy_from_slice(config);
+    device.send_feature_report(&report)?;
+    
+    // 2. Write config to flash (command 0x02)
+    let mut save_report = [0_u8; 64];
+    save_report[0] = settings.reports.command;
+    save_report[1] = 0x02; // CMD: write config to flash
+    device.send_feature_report(&save_report)?;
 
-            BridgeDevice {
-                id: device.path().to_string_lossy().to_string(),
-                label: format!("{product} - {manufacturer} - PID {product_id:04x}{serial_label}"),
-                vendor_id: device.vendor_id(),
-                product_id,
-                serial_number: serial,
-                config_only,
-            }
-        })
-        .collect())
+    Ok(())
 }
 
 pub fn read_config(device_id: &str) -> Result<BridgeConfig, BridgeError> {
@@ -170,16 +201,28 @@ pub fn read_config(device_id: &str) -> Result<BridgeConfig, BridgeError> {
 
 pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     let settings = settings();
-    let device = open_device(device_id)?;
+    eprintln!("[DEBUG] read_device_info opening: {}", device_id);
+    let device = match open_device(device_id) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[DEBUG] open_device failed: {:?}", e);
+            return Err(e);
+        }
+    };
 
     let firmware_result = read_feature_string(&device, settings.reports.firmware_version);
+    if let Err(ref e) = firmware_result {
+        eprintln!("[DEBUG] firmware read failed: {:?}", e);
+    }
+    
     let rssi_result = read_rssi(&device, settings.reports.rssi);
+    if let Err(ref e) = rssi_result {
+        eprintln!("[DEBUG] rssi read failed: {:?}", e);
+    }
+
     let (battery_level, is_charging) = read_battery(&device, settings.reports.battery);
     let rssi_val = rssi_result.as_ref().ok().and_then(|v| *v);
-    let battery_report_available = battery_level.is_some();
-    let rssi_report_available = rssi_val.is_some();
-    // 주기 갱신 경로에서는 무거운 기능/설정 리포트를 읽지 않고 배터리 리포트만 연결 신호로 사용합니다.
-    let controller_connected = battery_report_available;
+    let controller_connected = battery_level.unwrap_or(0) > 0 || rssi_val.unwrap_or(0) < 0;
 
     let manufacturer = device
         .get_manufacturer_string()
@@ -189,6 +232,7 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
         .get_product_string()
         .unwrap_or_else(|_| Some("Wireless Controller / Dongle".to_string()))
         .unwrap_or_else(|| "Wireless Controller / Dongle".to_string());
+
 
     let rssi_strength_label = match rssi_val {
         Some(r) if r >= -60 => "우수 (최상의 입력 레이턴시)".to_string(),
@@ -206,37 +250,15 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     Ok(DeviceInfo {
         firmware_version: firmware_result.as_ref().ok().and_then(Clone::clone),
         rssi: rssi_val,
-        capabilities: None,
         firmware_error: firmware_result.err().map(|error| error.to_string()),
         rssi_error: rssi_result.err().map(|error| error.to_string()),
-        capabilities_error: None,
         usb_vendor_name: format!("{manufacturer} ({product_name})"),
         usb_speed_class,
         rssi_strength_label,
         battery_level,
         is_charging,
-        dongle_connected: true,
         controller_connected,
-        battery_report_available,
-        rssi_report_available,
-        config_readable: false,
     })
-}
-
-pub fn read_capabilities(device_id: &str) -> Result<FirmwareCapabilities, BridgeError> {
-    let settings = settings();
-    let device = open_device(device_id)?;
-    match read_capabilities_from_device(&device, settings.reports.capabilities) {
-        Ok(capabilities) => Ok(capabilities),
-        Err(error) => {
-            let config = read_config(device_id)?;
-            Ok(infer_capabilities_from_config(
-                &config,
-                error.to_string(),
-                None,
-            ))
-        }
-    }
 }
 
 pub fn apply_config(device_id: &str, config: BridgeConfig) -> Result<(), BridgeError> {
@@ -309,11 +331,12 @@ pub fn test_adaptive_trigger(
 }
 
 fn open_device(device_id: &str) -> Result<HidDevice, BridgeError> {
-    let api = HidApi::new().map_err(|error| BridgeError::HidInit(error.to_string()))?;
-    let device_path = std::ffi::CString::new(device_id).map_err(|_| {
-        BridgeError::InvalidConfig("장치 경로에 유효하지 않은 문자가 포함되어 있습니다.".into())
-    })?;
-    api.open_path(&device_path).map_err(BridgeError::from)
+    with_hid_api(|api| {
+        let device_path = std::ffi::CString::new(device_id).map_err(|_| {
+            BridgeError::InvalidConfig("장치 경로에 유효하지 않은 문자가 포함되어 있습니다.".into())
+        })?;
+        api.open_path(&device_path).map_err(BridgeError::from)
+    })
 }
 
 fn send_command(device_id: &str, command: u8, body: Option<&[u8]>) -> Result<(), BridgeError> {
@@ -409,98 +432,85 @@ fn write_adaptive_trigger_output(
 }
 
 fn decode_config(bytes: &[u8], settings: &AppSettings) -> Result<BridgeConfig, BridgeError> {
-    if bytes.len() < 15 {
+    if bytes.len() < 30 {
         return Err(BridgeError::InvalidConfig(format!(
-            "설정 데이터 길이가 부족합니다. 실제 {}바이트, 최소 15바이트입니다.",
+            "설정 데이터 길이가 부족합니다. 실제 {}바이트, 최소 30바이트입니다.",
             bytes.len()
         )));
     }
 
-    let speaker_volume_db = f32::from_le_bytes(bytes[5..9].try_into().unwrap());
-    let config = BridgeConfig {
+    let mut config = BridgeConfig {
         config_version: bytes[0],
         haptics_gain: f32::from_le_bytes(bytes[1..5].try_into().unwrap()),
-        speaker_volume_percent: db_to_volume_percent(speaker_volume_db).round(),
-        inactive_time: bytes[9],
-        disable_inactive_disconnect: bytes[10] != 0,
-        disable_pico_led: bytes[11] != 0,
-        polling_rate_mode: bytes[12],
-        haptics_buffer_length: bytes[13],
-        controller_mode: bytes[14],
-        stick_calibration_enabled: bytes.get(15).copied().unwrap_or(0) != 0,
-        left_stick_center_x: read_i8_scaled(bytes, 16, 127.0).unwrap_or(0.0),
-        left_stick_center_y: read_i8_scaled(bytes, 17, 127.0).unwrap_or(0.0),
-        left_stick_deadzone: bytes.get(18).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
-        right_stick_center_x: read_i8_scaled(bytes, 19, 127.0).unwrap_or(0.0),
-        right_stick_center_y: read_i8_scaled(bytes, 20, 127.0).unwrap_or(0.0),
-        right_stick_deadzone: bytes.get(21).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
-        left_stick_min_x: read_i8_scaled(bytes, 22, 127.0).unwrap_or(-1.0),
-        left_stick_max_x: read_i8_scaled(bytes, 23, 127.0).unwrap_or(1.0),
-        left_stick_min_y: read_i8_scaled(bytes, 24, 127.0).unwrap_or(-1.0),
-        left_stick_max_y: read_i8_scaled(bytes, 25, 127.0).unwrap_or(1.0),
-        right_stick_min_x: read_i8_scaled(bytes, 26, 127.0).unwrap_or(-1.0),
-        right_stick_max_x: read_i8_scaled(bytes, 27, 127.0).unwrap_or(1.0),
-        right_stick_min_y: read_i8_scaled(bytes, 28, 127.0).unwrap_or(-1.0),
-        right_stick_max_y: read_i8_scaled(bytes, 29, 127.0).unwrap_or(1.0),
+        speaker_volume: bytes[5],
+        headset_volume: bytes[6],
+        speaker_gain: bytes[7],
+        inactive_time: bytes[8],
+        disable_pico_led: bytes[9] != 0,
+        polling_rate_mode: bytes[10],
+        audio_buffer_length: bytes[11],
+        controller_mode: bytes[12],
+        enable_usb_sn: bytes[13] != 0,
+        ps_shortcut_enabled: bytes[14] != 0,
+        disable_mic: bytes[15] != 0,
+        disable_speaker: bytes[16] != 0,
+        enable_wake: bytes[17] != 0,
+        trigger_reduce: bytes[18],
+        stick_calibration_enabled: bytes[19] != 0,
+        left_stick_center_x: read_i16_scaled(bytes, 20, 10000.0).unwrap_or(0.0),
+        left_stick_center_y: read_i16_scaled(bytes, 22, 10000.0).unwrap_or(0.0),
+        left_stick_deadzone: bytes.get(24).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
+        right_stick_center_x: read_i16_scaled(bytes, 25, 10000.0).unwrap_or(0.0),
+        right_stick_center_y: read_i16_scaled(bytes, 27, 10000.0).unwrap_or(0.0),
+        right_stick_deadzone: bytes.get(29).map(|v| f32::from(*v) / 10.0).unwrap_or(1.0),
+        left_stick_min_x: -1.0,
+        left_stick_max_x: 1.0,
+        left_stick_min_y: -1.0,
+        left_stick_max_y: 1.0,
+        right_stick_min_x: -1.0,
+        right_stick_max_x: 1.0,
+        right_stick_min_y: -1.0,
+        right_stick_max_y: 1.0,
     };
 
-    validate_config(&config, settings)?;
+    let rules = &settings.config;
+    if config.haptics_gain.is_nan() { config.haptics_gain = 1.0; }
+    config.haptics_gain = config.haptics_gain.clamp(rules.haptics_gain_min, rules.haptics_gain_max);
+    config.inactive_time = config.inactive_time.clamp(rules.inactive_time_min, rules.inactive_time_max);
+    config.audio_buffer_length = config.audio_buffer_length.clamp(rules.haptics_buffer_length_min, rules.haptics_buffer_length_max);
+    if config.polling_rate_mode > 2 { config.polling_rate_mode = 0; }
+    if config.controller_mode > 2 { config.controller_mode = 0; }
+
     Ok(config)
 }
 
 fn encode_config(config: &BridgeConfig) -> Vec<u8> {
-    let mut out = vec![0_u8; settings().config.body_length.max(15)];
+    let mut out = vec![0_u8; settings().config.body_length.max(30)];
     out[0] = settings().config.version;
     out[1..5].copy_from_slice(&config.haptics_gain.to_le_bytes());
-    out[5..9].copy_from_slice(&volume_percent_to_db(config.speaker_volume_percent).to_le_bytes());
-    out[9] = config.inactive_time;
-    out[10] = u8::from(config.disable_inactive_disconnect);
-    out[11] = u8::from(config.disable_pico_led);
-    out[12] = config.polling_rate_mode;
-    out[13] = config.haptics_buffer_length;
-    out[14] = config.controller_mode;
-
-    if out.len() >= 22 {
-        out[15] = u8::from(config.stick_calibration_enabled);
-        write_i8_scaled(&mut out, 16, config.left_stick_center_x, 127.0);
-        write_i8_scaled(&mut out, 17, config.left_stick_center_y, 127.0);
-        out[18] = (config.left_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
-        write_i8_scaled(&mut out, 19, config.right_stick_center_x, 127.0);
-        write_i8_scaled(&mut out, 20, config.right_stick_center_y, 127.0);
-        out[21] = (config.right_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
-    }
-
-    if out.len() >= 30 {
-        write_i8_scaled(&mut out, 22, config.left_stick_min_x, 127.0);
-        write_i8_scaled(&mut out, 23, config.left_stick_max_x, 127.0);
-        write_i8_scaled(&mut out, 24, config.left_stick_min_y, 127.0);
-        write_i8_scaled(&mut out, 25, config.left_stick_max_y, 127.0);
-        write_i8_scaled(&mut out, 26, config.right_stick_min_x, 127.0);
-        write_i8_scaled(&mut out, 27, config.right_stick_max_x, 127.0);
-        write_i8_scaled(&mut out, 28, config.right_stick_min_y, 127.0);
-        write_i8_scaled(&mut out, 29, config.right_stick_max_y, 127.0);
-    }
+    out[5] = config.speaker_volume;
+    out[6] = config.headset_volume;
+    out[7] = config.speaker_gain;
+    out[8] = config.inactive_time;
+    out[9] = u8::from(config.disable_pico_led);
+    out[10] = config.polling_rate_mode;
+    out[11] = config.audio_buffer_length;
+    out[12] = config.controller_mode;
+    out[13] = u8::from(config.enable_usb_sn);
+    out[14] = u8::from(config.ps_shortcut_enabled);
+    out[15] = u8::from(config.disable_mic);
+    out[16] = u8::from(config.disable_speaker);
+    out[17] = u8::from(config.enable_wake);
+    out[18] = config.trigger_reduce;
+    out[19] = u8::from(config.stick_calibration_enabled);
+    write_i16_scaled(&mut out, 20, config.left_stick_center_x, 10000.0);
+    write_i16_scaled(&mut out, 22, config.left_stick_center_y, 10000.0);
+    out[24] = (config.left_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
+    write_i16_scaled(&mut out, 25, config.right_stick_center_x, 10000.0);
+    write_i16_scaled(&mut out, 27, config.right_stick_center_y, 10000.0);
+    out[29] = (config.right_stick_deadzone.clamp(0.0, 25.5) * 10.0).round() as u8;
 
     out
-}
-
-fn db_to_volume_percent(db: f32) -> f32 {
-    if !db.is_finite() || db <= -100.0 {
-        return 0.0;
-    }
-    if db >= 0.0 {
-        return 100.0;
-    }
-    (10.0_f32.powf(db / 20.0) * 100.0).clamp(0.0, 100.0)
-}
-
-fn volume_percent_to_db(percent: f32) -> f32 {
-    let percent = percent.clamp(0.0, 100.0);
-    if percent <= 0.0 {
-        -100.0
-    } else {
-        (20.0 * (percent / 100.0).log10()).clamp(-100.0, 0.0)
-    }
 }
 
 fn validate_config(config: &BridgeConfig, settings: &AppSettings) -> Result<(), BridgeError> {
@@ -523,15 +533,6 @@ fn validate_config(config: &BridgeConfig, settings: &AppSettings) -> Result<(), 
         )));
     }
 
-    if config.speaker_volume_percent.is_nan()
-        || config.speaker_volume_percent < rules.speaker_volume_percent_min
-        || config.speaker_volume_percent > rules.speaker_volume_percent_max
-    {
-        return Err(BridgeError::InvalidConfig(
-            "스피커 음량은 0%부터 100% 사이여야 합니다.".into(),
-        ));
-    }
-
     if config.inactive_time < rules.inactive_time_min
         || config.inactive_time > rules.inactive_time_max
     {
@@ -546,11 +547,11 @@ fn validate_config(config: &BridgeConfig, settings: &AppSettings) -> Result<(), 
         ));
     }
 
-    if config.haptics_buffer_length < rules.haptics_buffer_length_min
-        || config.haptics_buffer_length > rules.haptics_buffer_length_max
+    if config.audio_buffer_length < rules.haptics_buffer_length_min
+        || config.audio_buffer_length > rules.haptics_buffer_length_max
     {
         return Err(BridgeError::InvalidConfig(
-            "햅틱 버퍼 길이는 16부터 128 사이여야 합니다.".into(),
+            "오디오 버퍼 길이는 16부터 128 사이여야 합니다.".into(),
         ));
     }
 
@@ -592,7 +593,14 @@ fn read_battery(device: &HidDevice, report_id: u8) -> (Option<u8>, Option<bool>)
     buffer[0] = report_id;
     if let Ok(len) = device.get_feature_report(&mut buffer) {
         if len >= 3 {
-            let level = buffer[1].min(100);
+            let raw_level = buffer[1];
+            // DualSense typically sends battery in a 0-10 scale.
+            // If it's sending 0-10, we multiply by 10 to get percentage.
+            let level = if raw_level <= 11 {
+                raw_level.saturating_mul(10)
+            } else {
+                raw_level
+            }.min(100);
             let power_state = buffer[2] & 0x0f;
             return (Some(level), Some(power_state == 0x01));
         }
@@ -600,117 +608,17 @@ fn read_battery(device: &HidDevice, report_id: u8) -> (Option<u8>, Option<bool>)
     (None, None)
 }
 
-fn read_capabilities_from_device(
-    device: &HidDevice,
-    report_id: u8,
-) -> Result<FirmwareCapabilities, BridgeError> {
-    let mut buffer = [0_u8; 64];
-    buffer[0] = report_id;
-    let len = device.get_feature_report(&mut buffer)?;
-    if len <= 1 {
-        return Err(BridgeError::InvalidConfig(
-            "펌웨어 기능 리포트가 비어 있습니다.".into(),
-        ));
-    }
-    let payload = &buffer[1..len];
-
-    if payload.len() < 12 || &payload[0..4] != b"D5CP" {
-        return Err(BridgeError::InvalidConfig(
-            "펌웨어 기능 리포트 형식이 올바르지 않습니다.".into(),
-        ));
-    }
-
-    let feature_flags = u32::from_le_bytes(payload[8..12].try_into().unwrap());
-    let new_build_channel = read_capability_string(payload, 13, 14);
-    let controller_connected = new_build_channel.as_ref().map(|_| payload[12] & 0x01 != 0);
-    let build_channel = new_build_channel.or_else(|| read_capability_string(payload, 12, 13));
-    let protocol_version = payload[4];
-    let config_version = payload[5];
-    let config_body_length = payload[6];
-    if protocol_version == 0 {
-        return Err(BridgeError::InvalidConfig(
-            "펌웨어 기능 리포트 프로토콜 버전이 올바르지 않습니다.".into(),
-        ));
-    }
-    if config_body_length < 15 {
-        return Err(BridgeError::InvalidConfig(format!(
-            "펌웨어 기능 리포트의 설정 길이가 너무 짧습니다: {}바이트",
-            config_body_length
-        )));
-    }
-
-    Ok(FirmwareCapabilities {
-        protocol_version,
-        config_version,
-        config_body_length,
-        build_channel,
-        controller_connected,
-        feature_flags,
-        supports_battery: feature_flags & (1 << 0) != 0,
-        supports_rssi: feature_flags & (1 << 1) != 0,
-        supports_vibration_test: feature_flags & (1 << 2) != 0,
-        supports_adaptive_trigger: feature_flags & (1 << 3) != 0,
-        supports_bootloader_command: feature_flags & (1 << 4) != 0,
-        supports_stick_calibration: feature_flags & (1 << 5) != 0,
-        supports_directional_stick_calibration: feature_flags & (1 << 6) != 0,
-    })
+fn read_i16_scaled(bytes: &[u8], offset: usize, scale: f32) -> Option<f32> {
+    let slice = bytes.get(offset..offset + 2)?;
+    Some(i16::from_le_bytes(slice.try_into().ok()?) as f32 / scale)
 }
 
-fn infer_capabilities_from_config(
-    config: &BridgeConfig,
-    source_error: String,
-    controller_connected: Option<bool>,
-) -> FirmwareCapabilities {
-    let supports_v3 = config.config_version >= 3;
-    let mut feature_flags = 0_u32;
-    if supports_v3 {
-        feature_flags |= 1 << 0; // battery
-        feature_flags |= 1 << 1; // RSSI
-        feature_flags |= 1 << 2; // vibration test
-        feature_flags |= 1 << 3; // adaptive trigger
-        feature_flags |= 1 << 4; // bootloader command
-        feature_flags |= 1 << 5; // stick calibration
-        feature_flags |= 1 << 6; // directional stick calibration
-    }
-
-    FirmwareCapabilities {
-        protocol_version: 1,
-        config_version: config.config_version,
-        config_body_length: settings().config.body_length.min(u8::MAX as usize) as u8,
-        build_channel: Some(format!("fallback: {source_error}")),
-        controller_connected,
-        feature_flags,
-        supports_battery: supports_v3,
-        supports_rssi: supports_v3,
-        supports_vibration_test: supports_v3,
-        supports_adaptive_trigger: supports_v3,
-        supports_bootloader_command: supports_v3,
-        supports_stick_calibration: supports_v3,
-        supports_directional_stick_calibration: supports_v3,
-    }
-}
-
-fn read_capability_string(payload: &[u8], length_offset: usize, value_offset: usize) -> Option<String> {
-    let length = usize::from(*payload.get(length_offset)?);
-    let end = value_offset.checked_add(length)?;
-    payload
-        .get(value_offset..end)
-        .and_then(|bytes| std::str::from_utf8(bytes).ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
-fn read_i8_scaled(bytes: &[u8], offset: usize, scale: f32) -> Option<f32> {
-    bytes.get(offset).map(|value| (*value as i8) as f32 / scale)
-}
-
-fn write_i8_scaled(out: &mut [u8], offset: usize, value: f32, scale: f32) {
-    if let Some(slot) = out.get_mut(offset) {
+fn write_i16_scaled(out: &mut [u8], offset: usize, value: f32, scale: f32) {
+    if let Some(slice) = out.get_mut(offset..offset + 2) {
         let scaled = (value.clamp(-1.0, 1.0) * scale)
             .round()
-            .clamp(i8::MIN as f32, i8::MAX as f32) as i8;
-        *slot = scaled as u8;
+            .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+        slice.copy_from_slice(&scaled.to_le_bytes());
     }
 }
 
@@ -725,3 +633,14 @@ fn default_stick_min() -> f32 {
 fn default_stick_max() -> f32 {
     1.0
 }
+
+#[test]
+fn do_reset_all() {
+    if let Ok(devices) = list_devices() {
+        for dev in devices {
+            println!("Resetting: {}", dev.id);
+            let _ = enter_bootloader(&dev.id);
+        }
+    }
+}
+

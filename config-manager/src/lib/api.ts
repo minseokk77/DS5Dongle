@@ -9,19 +9,27 @@ export interface BridgeDevice {
   vendor_id: number;
   product_id: number;
   serial_number?: string | null;
-  config_only: boolean;
 }
 
 export interface BridgeConfig {
   config_version: number;
   haptics_gain: number;
-  speaker_volume_percent: number;
+  speaker_volume_percent: number; // old?
+  speaker_volume: number;
+  headset_volume: number;
+  speaker_gain: number;
   inactive_time: number;
   disable_inactive_disconnect: boolean;
   disable_pico_led: boolean;
   polling_rate_mode: PollingRateMode;
-  haptics_buffer_length: number;
+  audio_buffer_length: number;
   controller_mode: ControllerMode;
+  disable_mic: boolean;
+  disable_speaker: boolean;
+  enable_wake: boolean;
+  trigger_reduce: number;
+  enable_usb_sn: boolean;
+  ps_shortcut_enabled: boolean;
   stick_calibration_enabled?: boolean;
   left_stick_center_x?: number;
   left_stick_center_y?: number;
@@ -42,36 +50,14 @@ export interface BridgeConfig {
 export interface DeviceInfo {
   firmware_version?: string | null;
   rssi?: number | null;
-  capabilities?: FirmwareCapabilities | null;
   firmware_error?: string | null;
   rssi_error?: string | null;
-  capabilities_error?: string | null;
   usb_vendor_name: string;
   usb_speed_class: string;
   rssi_strength_label: string;
   battery_level?: number | null;
   is_charging?: boolean | null;
-  dongle_connected?: boolean;
   controller_connected?: boolean;
-  battery_report_available?: boolean;
-  rssi_report_available?: boolean;
-  config_readable?: boolean;
-}
-
-export interface FirmwareCapabilities {
-  protocol_version: number;
-  config_version: number;
-  config_body_length: number;
-  build_channel?: string | null;
-  controller_connected?: boolean | null;
-  feature_flags: number;
-  supports_battery: boolean;
-  supports_rssi: boolean;
-  supports_vibration_test: boolean;
-  supports_adaptive_trigger: boolean;
-  supports_bootloader_command: boolean;
-  supports_stick_calibration: boolean;
-  supports_directional_stick_calibration: boolean;
 }
 
 export interface FirmwareUpdateInfo {
@@ -84,11 +70,6 @@ export interface FirmwareFlashResult {
   version: string;
   asset_name: string;
   drive: string;
-  copied_bytes: number;
-  expected_bytes: number;
-  drive_disappeared: boolean;
-  reconnected: boolean;
-  restored_settings: boolean;
 }
 
 export async function listDevices(): Promise<BridgeDevice[]> {
@@ -112,14 +93,6 @@ export async function readDeviceInfo(deviceId: string): Promise<DeviceInfo> {
     return await invoke<DeviceInfo>('read_device_info', { deviceId });
   } catch (error) {
     throw friendlyError(error, '장치 정보를 읽지 못했습니다.');
-  }
-}
-
-export async function readCapabilities(deviceId: string): Promise<FirmwareCapabilities> {
-  try {
-    return await invoke<FirmwareCapabilities>('read_capabilities', { deviceId });
-  } catch (error) {
-    throw friendlyError(error, '펌웨어 기능 리포트를 읽지 못했습니다.');
   }
 }
 
@@ -201,9 +174,9 @@ export async function flashLatestDebugFirmware(deviceId?: string): Promise<Firmw
   }
 }
 
-export async function recoveryFlashLatestDebugFirmware(): Promise<FirmwareFlashResult> {
+export async function recoveryFlashLatestDebugFirmware(deviceId?: string): Promise<FirmwareFlashResult> {
   try {
-    return await invoke<FirmwareFlashResult>('recovery_flash_latest_debug_firmware');
+    return await invoke<FirmwareFlashResult>('recovery_flash_latest_debug_firmware', { deviceId });
   } catch (error) {
     throw friendlyError(error, '복구 펌웨어 업데이트를 완료하지 못했습니다.');
   }
