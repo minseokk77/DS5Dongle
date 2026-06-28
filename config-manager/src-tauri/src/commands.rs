@@ -1,5 +1,5 @@
 use crate::bridge::{self, BridgeConfig, BridgeDevice, BridgeError, DeviceInfo};
-use crate::updater::{self, FirmwareFlashResult, FirmwareUpdateInfo, UpdateError};
+use crate::updater::{self, FirmwareFlashResult, FirmwareUpdateInfo, UpdateError, AppUpdateInfo};
 
 #[tauri::command]
 pub async fn list_devices() -> Result<Vec<BridgeDevice>, BridgeError> {
@@ -65,4 +65,14 @@ pub async fn flash_latest_debug_firmware(device_id: Option<String>) -> Result<Fi
 #[tauri::command]
 pub async fn recovery_flash_latest_debug_firmware(device_id: Option<String>) -> Result<FirmwareFlashResult, UpdateError> {
     updater::recovery_flash_latest_debug_firmware(device_id).await
+}
+
+#[tauri::command]
+pub async fn check_app_update(current_version: String) -> Result<Option<AppUpdateInfo>, UpdateError> {
+    updater::check_app_update(&current_version).await
+}
+
+#[tauri::command]
+pub async fn install_app_update(download_url: String) -> Result<(), UpdateError> {
+    updater::install_app_update(&download_url).await
 }

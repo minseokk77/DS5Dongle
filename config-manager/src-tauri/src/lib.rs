@@ -49,7 +49,9 @@ pub fn run() {
             commands::test_adaptive_trigger,
             commands::check_debug_firmware_update,
             commands::flash_latest_debug_firmware,
-            commands::recovery_flash_latest_debug_firmware
+            commands::recovery_flash_latest_debug_firmware,
+            commands::check_app_update,
+            commands::install_app_update
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 애플리케이션 실행 중 복구할 수 없는 오류가 발생했습니다.");

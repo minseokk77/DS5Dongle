@@ -2,6 +2,7 @@
   import Icon from '../Icon.svelte';
   import LanguageThemeSelector from './LanguageThemeSelector.svelte';
   import type { Lang } from '../i18n';
+  import type { AppUpdateInfo } from '../api';
 
   type ThemeMode = 'light' | 'dark' | 'system';
   type CloseBehavior = 'tray' | 'exit';
@@ -43,6 +44,9 @@
   export let autoFirmwareUpdate: boolean;
   export let appVersion = '';
   export let firmwareVersion = '';
+  export let appUpdate: AppUpdateInfo | null = null;
+  export let appUpdateRunning = false;
+  export let onAppUpdate: () => void | Promise<void> = () => {};
   export let versionWarning = '';
   export let releaseChannel = '';
   export let updateRepository = '';
@@ -130,6 +134,16 @@
             <option value="exit">{text.closeToExit}</option>
           </select>
         </label>
+        {#if appUpdate}
+          <div class="version-grid" style="margin-top: 10px;">
+            <span>새 앱 버전</span>
+            <strong>{appUpdate.version}</strong>
+            <span style="grid-column: 1 / 3; color: var(--text);">{appUpdate.body || '새로운 기능 및 버그 수정이 포함되어 있습니다.'}</span>
+          </div>
+          <button class="settings-action-btn" type="button" onclick={onAppUpdate} disabled={appUpdateRunning}>
+            <Icon name="download" size={15} /> {appUpdateRunning ? '앱 업데이트 다운로드 중...' : '앱 업데이트 설치 (.exe)'}
+          </button>
+        {/if}
       </div>
 
       <div class="settings-group">

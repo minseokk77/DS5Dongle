@@ -48,6 +48,14 @@ pub struct FirmwareFlashResult {
 }
 
 #[derive(Debug, Serialize)]
+pub struct AppUpdateInfo {
+    pub version: String,
+    pub asset_name: String,
+    pub download_url: String,
+    pub body: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct BootloaderStatus {
     pub available: bool,
     pub drive: Option<String>,
@@ -57,6 +65,7 @@ pub struct BootloaderStatus {
 struct GitHubRelease {
     tag_name: String,
     draft: bool,
+    body: Option<String>,
     assets: Vec<GitHubAsset>,
 }
 
@@ -100,6 +109,65 @@ pub async fn check_debug_firmware_update() -> Result<FirmwareUpdateInfo, UpdateE
                 })
         })
         .ok_or(UpdateError::NoDebugAsset)
+}
+
+pub async fn check_app_update(current_version: &str) -> Result<Option<AppUpdateInfo>, UpdateError> {
+    let update_settings = &settings().firmware_update;
+    let releases_api = format!(
+        "https://api.github.com/repos/{}/{}/releases",
+        update_settings.github_owner, update_settings.github_repo
+    );
+    
+    let response = github_client()
+        .get(releases_api)
+        .send()
+        .await?
+        .error_for_status()?;
+        
+    let releases = response.json::<Vec<GitHubRelease>>().await?;
+    
+    let current_v = if current_version.starts_with('v') {
+        current_version.to_string()
+    } else {
+        format!("v{}", current_version)
+    };
+
+    if let Some(latest) = releases.into_iter().filter(|r| !r.draft).next() {
+        if latest.tag_name != current_v {
+            if let Some(asset) = latest.assets.into_iter().find(|a| {
+                let name = a.name.to_ascii_lowercase();
+                name.ends_with(".exe") && name.contains("setup")
+            }) {
+                return Ok(Some(AppUpdateInfo {
+                    version: latest.tag_name,
+                    asset_name: asset.name,
+                    download_url: asset.browser_download_url,
+                    body: latest.body.unwrap_or_default(),
+                }));
+            }
+        }
+    }
+    
+    Ok(None)
+}
+
+pub async fn install_app_update(download_url: &str) -> Result<(), UpdateError> {
+    let response = github_client()
+        .get(download_url)
+        .send()
+        .await?
+        .error_for_status()?;
+        
+    let bytes = response.bytes().await?;
+    let temp_dir = std::env::temp_dir();
+    let target = temp_dir.join("DS5Dongle_Setup.exe");
+    fs::write(&target, bytes)?;
+    
+    std::process::Command::new(&target)
+        .spawn()?;
+        
+    // Exit current app so installer can overwrite files
+    std::process::exit(0);
 }
 
 pub async fn flash_latest_debug_firmware(

@@ -47,6 +47,42 @@ export interface BridgeConfig {
   right_stick_max_y?: number;
 }
 
+export const defaultConfig: BridgeConfig = {
+  config_version: 5,
+  haptics_gain: 1,
+  speaker_volume: 50,
+  speaker_volume_percent: 50,
+  headset_volume: 50,
+  speaker_gain: 0,
+  inactive_time: 10,
+  disable_inactive_disconnect: false,
+  disable_pico_led: false,
+  polling_rate_mode: 2,
+  audio_buffer_length: 64,
+  controller_mode: 0,
+  enable_usb_sn: false,
+  ps_shortcut_enabled: false,
+  disable_mic: false,
+  disable_speaker: false,
+  enable_wake: false,
+  trigger_reduce: 0,
+  stick_calibration_enabled: false,
+  left_stick_center_x: 0,
+  left_stick_center_y: 0,
+  left_stick_deadzone: 0,
+  right_stick_center_x: 0,
+  right_stick_center_y: 0,
+  right_stick_deadzone: 0,
+  left_stick_min_x: -1,
+  left_stick_max_x: 1,
+  left_stick_min_y: -1,
+  left_stick_max_y: 1,
+  right_stick_min_x: -1,
+  right_stick_max_x: 1,
+  right_stick_min_y: -1,
+  right_stick_max_y: 1
+};
+
 export interface DeviceInfo {
   firmware_version?: string | null;
   rssi?: number | null;
@@ -98,7 +134,18 @@ export async function readDeviceInfo(deviceId: string): Promise<DeviceInfo> {
 
 export async function applyConfig(deviceId: string, config: BridgeConfig): Promise<void> {
   try {
-    await invoke('apply_config', { deviceId, config });
+    const safeConfig = { ...defaultConfig, ...config };
+    // JSON.stringify will drop undefined values, but we want to ensure they are at least the default
+    for (const key in safeConfig) {
+      if ((safeConfig as any)[key] === undefined || (safeConfig as any)[key] === null) {
+        (safeConfig as any)[key] = (defaultConfig as any)[key];
+      }
+    }
+    // Backward compatibility if Svelte only sent speaker_volume_percent
+    if (safeConfig.speaker_volume === undefined || safeConfig.speaker_volume === null) {
+      safeConfig.speaker_volume = safeConfig.speaker_volume_percent ?? 50;
+    }
+    await invoke('apply_config', { deviceId, config: safeConfig });
   } catch (error) {
     throw friendlyError(error, '설정을 장치에 적용하지 못했습니다.');
   }
@@ -155,6 +202,29 @@ export async function testAdaptiveTrigger(
     });
   } catch (error) {
     throw friendlyError(error, '적응형 트리거 테스트 명령을 보내지 못했습니다.');
+  }
+}
+
+export interface AppUpdateInfo {
+  version: string;
+  asset_name: string;
+  download_url: string;
+  body: string;
+}
+
+export async function checkAppUpdate(currentVersion: string): Promise<AppUpdateInfo | null> {
+  try {
+    return await invoke<AppUpdateInfo | null>('check_app_update', { currentVersion });
+  } catch (error) {
+    throw friendlyError(error, '앱 업데이트를 확인하지 못했습니다.');
+  }
+}
+
+export async function installAppUpdate(downloadUrl: string): Promise<void> {
+  try {
+    await invoke('install_app_update', { downloadUrl });
+  } catch (error) {
+    throw friendlyError(error, '앱 업데이트를 설치하지 못했습니다.');
   }
 }
 

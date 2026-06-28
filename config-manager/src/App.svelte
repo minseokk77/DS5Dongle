@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { getVersion } from '@tauri-apps/api/app';
   import appIcon from './assets/app-icon.svg';
   import Icon from './lib/Icon.svelte';
   import { i18n, type Lang, type StatusCode } from './lib/i18n';
@@ -20,6 +21,10 @@
     reconnectUsb,
     recoveryFlashLatestDebugFirmware,
     saveConfig,
+    checkAppUpdate,
+    installAppUpdate,
+    defaultConfig,
+    type AppUpdateInfo,
     type BridgeConfig,
     type BridgeDevice,
     type DeviceInfo
@@ -43,42 +48,7 @@
     reason: string;
   }
 
-  const defaultConfig: BridgeConfig = {
-    config_version: 5,
-    haptics_gain: 1,
-    speaker_volume: 50,
-    speaker_volume_percent: 50,
-    headset_volume: 50,
-    speaker_gain: 0,
-    inactive_time: 10,
-    disable_inactive_disconnect: false,
-    disable_pico_led: false,
-    polling_rate_mode: 2,
-    audio_buffer_length: 64,
-    controller_mode: 0,
-    enable_usb_sn: false,
-    ps_shortcut_enabled: false,
-    disable_mic: false,
-    disable_speaker: false,
-    enable_wake: false,
-    trigger_reduce: 0,
-    stick_calibration_enabled: false,
-    left_stick_center_x: 0,
-    left_stick_center_y: 0,
-    left_stick_deadzone: 1,
-    right_stick_center_x: 0,
-    right_stick_center_y: 0,
-    right_stick_deadzone: 1,
-    left_stick_min_x: -1,
-    left_stick_max_x: 1,
-    left_stick_min_y: -1,
-    left_stick_max_y: 1,
-    right_stick_min_x: -1,
-    right_stick_max_x: 1,
-    right_stick_min_y: -1,
-    right_stick_max_y: 1
-  };
-  const appVersion = '0.0.2.3';
+  let appVersion = $state('');
   const releaseChannel = 'debug';
   const updateRepository = 'minseokk77/DS5Dongle';
 
@@ -94,6 +64,8 @@
     usb_speed_class: '',
     rssi_strength_label: ''
   });
+  let appUpdate: AppUpdateInfo | null = $state(null);
+  let appUpdateRunning = $state(false);
   let statusCode: StatusCode = $state('ready');
   let statusOverride = $state('');
   let toastText = $state('');
@@ -147,7 +119,32 @@
     config.right_stick_deadzone
   ));
 
+  async function handleAppUpdate() {
+    if (!appUpdate) return;
+    appUpdateRunning = true;
+    showToast('앱 업데이트 설치 파일을 다운로드하고 있습니다...', 'info');
+    try {
+      await installAppUpdate(appUpdate.download_url);
+    } catch (err) {
+      showToast('앱 업데이트 실패: ' + (err instanceof Error ? err.message : String(err)), 'error');
+      appUpdateRunning = false;
+    }
+  }
+
   onMount(() => {
+    getVersion().then(v => {
+      appVersion = v;
+      checkAppUpdate(v).then(info => {
+        appUpdate = info;
+        if (info) {
+          addLog(`앱 업데이트 가능: ${info.version}`, 'info');
+          showToast(`새로운 앱 버전(${info.version})이 있습니다. 설정에서 업데이트를 설치하세요.`, 'info');
+        }
+      }).catch(err => {
+        addLog(`앱 업데이트 확인 실패: ${err.message}`, 'error');
+      });
+    });
+
     // 저장된 언어와 테마 설정을 먼저 반영합니다.
     const savedLang = localStorage.getItem('ds5:lang');
     if (savedLang === 'ko' || savedLang === 'en' || savedLang === 'zh') {
@@ -796,6 +793,9 @@
     firmwareVersion={settingsFirmwareVersion}
     {releaseChannel}
     {updateRepository}
+    {appUpdate}
+    {appUpdateRunning}
+    onAppUpdate={handleAppUpdate}
     configVersion={`v${config.config_version}`}
     {calibrationEnabled}
     {leftCalibrationSummary}
