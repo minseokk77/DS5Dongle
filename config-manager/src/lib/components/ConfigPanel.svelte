@@ -189,6 +189,23 @@
     }
   }
 
+  function overwritePreset() {
+    if (!selectedPreset || selectedPreset.isBuiltIn) return;
+    try {
+      const idx = customPresets.findIndex(p => p.id === selectedPreset.id);
+      if (idx !== -1) {
+        customPresets[idx].config = { ...config };
+        customPresets = [...customPresets];
+        localStorage.setItem('ds5:custom_presets', JSON.stringify(customPresets));
+        selectedPresetSnapshot = JSON.stringify(config);
+        showToast(text.presetSaved, 'info');
+        onLog(`${text.presetSaved}: ${selectedPreset.name}`);
+      }
+    } catch (error) {
+      showToast(text.errorUnknown, 'error');
+    }
+  }
+
   // Delete a custom preset.
   function deletePreset(presetId: string, event: MouseEvent) {
     event.stopPropagation();
@@ -309,6 +326,18 @@
             <span class="preset-state modified">
               {text.modified}
             </span>
+          {/if}
+
+          {#if selectedPreset && !selectedPreset.isBuiltIn && selectedPresetModified}
+            <button 
+              type="button" 
+              onclick={overwritePreset}
+              style="background: rgba(217, 119, 6, 0.1); border: 1px solid rgba(217, 119, 6, 0.25); color: #d97706; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 500; cursor: pointer; height: 32px; display: inline-flex; align-items: center; gap: 4px; transition: background 0.15s;"
+              onmouseenter={(e) => e.currentTarget.style.background = 'rgba(217, 119, 6, 0.2)'}
+              onmouseleave={(e) => e.currentTarget.style.background = 'rgba(217, 119, 6, 0.1)'}
+            >
+              <Icon name="save" size={13} /> {text.overwritePreset}
+            </button>
           {/if}
 
           <button 
