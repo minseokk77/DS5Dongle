@@ -76,3 +76,8 @@ pub async fn check_app_update(current_version: String) -> Result<Option<AppUpdat
 pub async fn install_app_update(download_url: String) -> Result<(), UpdateError> {
     updater::install_app_update(&download_url).await
 }
+
+#[tauri::command]
+pub fn quit_app(app_handle: tauri::AppHandle) {
+    app_handle.exit(0);
+}
