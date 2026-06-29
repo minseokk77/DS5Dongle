@@ -103,6 +103,8 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
         return 1;
     }
     if (report_id == 0xf5) {
+        if (!bt_is_connected()) return 0;
+
         const uint8_t b   = interrupt_in_data[52];
         const uint8_t pct = b & 0x0F;
         const uint8_t st  = (b >> 4) & 0x0F;
