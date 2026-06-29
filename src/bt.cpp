@@ -121,6 +121,10 @@ bool bt_disconnect() {
     return true;
 }
 
+bool bt_is_connected() {
+    return acl_handle != HCI_CON_HANDLE_INVALID;
+}
+
 void bt_get_signal_strength(int8_t *rssi) {
     // gap_read_rssi() completes asynchronously, so this function can only
     // return the last cached RSSI value. Trigger a refresh afterwards so a
