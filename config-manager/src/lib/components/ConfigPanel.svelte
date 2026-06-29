@@ -398,7 +398,32 @@
       </label>
     </section>
 
-    <!-- Group 2: Audio & Mic -->
+    <!-- Group 2: Haptics & Trigger -->
+    <section class="config-card" style="padding-bottom: 6px;">
+      <div class="card-head">
+        <span><Icon name="gamepad" size={17} /></span>
+        <div>
+          <h3>{text.hapticsTriggerTitle}</h3>
+        </div>
+      </div>
+      <label class="control-row">
+        <strong>{text.hapticsGain}</strong>
+        <input type="range" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
+        <input type="number" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
+      </label>
+      <label class="control-row">
+        <strong>{text.triggerReduce || 'Trigger Reduce'}</strong>
+        <input type="range" min="0" max="10" step="1" bind:value={config.trigger_reduce} />
+        <input type="number" min="0" max="10" step="1" bind:value={config.trigger_reduce} />
+      </label>
+      <label class="control-row">
+        <strong>{text.hapticsBuffer}</strong>
+        <input type="range" min="16" max="128" step="1" bind:value={config.audio_buffer_length} />
+        <input type="number" min="16" max="128" step="1" bind:value={config.audio_buffer_length} />
+      </label>
+    </section>
+
+    <!-- Group 3: Audio & Mic -->
     <section class="config-card" style="padding-bottom: 6px;">
       <div class="card-head">
         <span><Icon name="volume" size={17} /></span>
@@ -428,31 +453,6 @@
         <strong>{text.headsetVolume || 'Headset Volume'}</strong>
         <input type="range" min="0" max="127" step="1" bind:value={config.headset_volume} />
         <input type="number" min="0" max="127" step="1" bind:value={config.headset_volume} />
-      </label>
-    </section>
-
-    <!-- Group 3: Haptics & Trigger -->
-    <section class="config-card" style="padding-bottom: 6px;">
-      <div class="card-head">
-        <span><Icon name="gamepad" size={17} /></span>
-        <div>
-          <h3>{text.hapticsTriggerTitle}</h3>
-        </div>
-      </div>
-      <label class="control-row">
-        <strong>{text.hapticsGain}</strong>
-        <input type="range" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
-        <input type="number" min="0.1" max="2" step="0.01" bind:value={config.haptics_gain} />
-      </label>
-      <label class="control-row">
-        <strong>{text.triggerReduce || 'Trigger Reduce'}</strong>
-        <input type="range" min="0" max="10" step="1" bind:value={config.trigger_reduce} />
-        <input type="number" min="0" max="10" step="1" bind:value={config.trigger_reduce} />
-      </label>
-      <label class="control-row">
-        <strong>{text.hapticsBuffer}</strong>
-        <input type="range" min="16" max="128" step="1" bind:value={config.audio_buffer_length} />
-        <input type="number" min="16" max="128" step="1" bind:value={config.audio_buffer_length} />
       </label>
     </section>
 
