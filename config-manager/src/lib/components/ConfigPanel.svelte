@@ -471,7 +471,7 @@
         <button class:active={config.polling_rate_mode === 2} type="button" onclick={() => (config.polling_rate_mode = 2)}>{text.realTime}</button>
       </div>
 
-      <strong class="field-label" style="margin-top: 4px; margin-bottom: 3px;">{text.controllerMode}</strong>
+      <strong class="field-label" style="margin-top: 14px; margin-bottom: 3px;">{text.controllerMode}</strong>
       <div class="seg wide">
         <button class:active={config.controller_mode === 0} type="button" onclick={() => (config.controller_mode = 0)}>DS5</button>
         <button class:active={config.controller_mode === 1} type="button" onclick={() => (config.controller_mode = 1)}>DSE</button>
