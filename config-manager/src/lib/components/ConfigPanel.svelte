@@ -389,14 +389,6 @@
         <input type="number" min="5" max="60" step="1" bind:value={config.inactive_time} />
       </label>
       <label class="switch-row">
-        <strong>{text.disableSpeaker || 'Disable Speaker'}</strong>
-        <input type="checkbox" bind:checked={config.disable_speaker} />
-      </label>
-      <label class="switch-row">
-        <strong>{text.disableMic || 'Disable Mic'}</strong>
-        <input type="checkbox" bind:checked={config.disable_mic} />
-      </label>
-      <label class="switch-row">
         <strong>{text.enableWake}</strong>
         <input type="checkbox" bind:checked={config.enable_wake} />
       </label>
@@ -414,6 +406,14 @@
           <h3>{text.audioTitle}</h3>
         </div>
       </div>
+      <label class="switch-row">
+        <strong>{text.disableSpeaker || 'Disable Speaker'}</strong>
+        <input type="checkbox" bind:checked={config.disable_speaker} />
+      </label>
+      <label class="switch-row">
+        <strong>{text.disableMic || 'Disable Mic'}</strong>
+        <input type="checkbox" bind:checked={config.disable_mic} />
+      </label>
       <label class="control-row">
         <strong>{text.speakerVolume}</strong>
         <input type="range" min="0" max="127" step="1" bind:value={config.speaker_volume} />
@@ -485,10 +485,6 @@
       <label class="switch-row" style="margin-top: 10px;">
         <strong>{text.psShortcutEnabled || 'PS Shortcut'}</strong>
         <input type="checkbox" bind:checked={config.ps_shortcut_enabled} />
-      </label>
-      <label class="switch-row" style="margin-top: 10px;">
-        <strong>{text.enableWake || 'Enable Wake'}</strong>
-        <input type="checkbox" bind:checked={config.enable_wake} />
       </label>
     </section>
   </div>
