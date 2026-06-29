@@ -1,6 +1,6 @@
 [package]
 name = "ds5-bridge-config-tauri"
-version = "0.0.36"
+version = "0.0.37"
 description = "DS5 Bridge Config Manager"
 authors = ["minse"]
 edition = "2024"

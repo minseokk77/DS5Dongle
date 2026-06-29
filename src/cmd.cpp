@@ -66,7 +66,7 @@ uint16_t pico_cmd_get(uint8_t report_id, uint8_t *buffer, uint16_t reqlen) {
             0x00, // FEATURE_FLAGS >> 16
             0x00, // FEATURE_FLAGS >> 24
         };
-        capabilities[12] = bt_is_controller_connected() ? 1 : 0;
+        capabilities[12] = bt_is_connected() ? 1 : 0;
         const char* build_channel = "release";
 #if ENABLE_VERBOSE
         build_channel = "debug";
