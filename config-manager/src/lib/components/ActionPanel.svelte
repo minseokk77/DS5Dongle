@@ -21,18 +21,24 @@
     <h2>{text.actions}</h2>
   </div>
   <div class="action-stack">
-    <button type="button" onclick={onRead} disabled={!isConnected || isBusy}>
-      <Icon name="rotate-cw" size={15} /> {text.read}
-    </button>
-    <button class="primary" type="button" onclick={onSave} disabled={!isConnected || isBusy}>
-      <Icon name="save" size={15} /> {text.saveToFlash}
-    </button>
-    <button type="button" onclick={onReconnect} disabled={!isConnected || isBusy}>
-      <Icon name="power" size={15} /> {text.reconnectUsb}
-    </button>
-    <button type="button" onclick={onFirmwareUpdate} disabled={isBusy}>
-      <Icon name="download" size={15} /> {text.firmwareUpdate}
-    </button>
+    {#if isConnected}
+      <button type="button" onclick={onRead} disabled={isBusy}>
+        <Icon name="rotate-cw" size={15} /> {text.read}
+      </button>
+      <button class="primary" type="button" onclick={onSave} disabled={isBusy}>
+        <Icon name="save" size={15} /> {text.saveToFlash}
+      </button>
+      <button class="quiet" type="button" onclick={onReconnect} disabled={isBusy}>
+        <Icon name="power" size={15} /> {text.reconnectUsb}
+      </button>
+    {/if}
+    <div class="maintenance-action">
+      <span>{text.firmwareMaintenance}</span>
+      <p>{text.firmwareMaintenanceDesc}</p>
+      <button class="secondary" type="button" onclick={onFirmwareUpdate} disabled={isBusy}>
+        <Icon name="download" size={15} /> {text.firmwareUpdate}
+      </button>
+    </div>
   </div>
   <div class="state-card">
     <div class="overline">{text.state}</div>

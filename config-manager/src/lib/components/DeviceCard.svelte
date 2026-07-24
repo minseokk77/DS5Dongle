@@ -113,9 +113,9 @@
 </script>
 
 <section class="device-card" data-tauri-drag-region>
-  <div class="device-left">
-    <div class="square-icon"><Icon name="cable" size={18} /></div>
-    <div>
+  <div class="device-left" data-tauri-drag-region>
+    <div class="square-icon" data-tauri-drag-region><Icon name="cable" size={18} /></div>
+    <div style="pointer-events: none;" data-tauri-drag-region>
       <div class="overline">{text.device}</div>
       <div class="device-name">{deviceTitle}</div>
       {#if isBridgeConnected}

@@ -109,6 +109,14 @@ impl serde::Serialize for BridgeError {
 lazy_static::lazy_static! {
     pub static ref DEVICE_CACHE: std::sync::Mutex<Vec<BridgeDevice>> = std::sync::Mutex::new(Vec::new());
     static ref HID_API: std::sync::Mutex<Option<HidApi>> = std::sync::Mutex::new(None);
+    static ref BG_HID_API: std::sync::Mutex<Option<HidApi>> = std::sync::Mutex::new(None);
+    static ref ACTIVE_HANDLES: std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::Mutex<HidDevice>>>> = std::sync::Mutex::new(std::collections::HashMap::new());
+}
+
+fn evict_device(device_id: &str) {
+    if let Ok(mut handles) = ACTIVE_HANDLES.lock() {
+        handles.remove(device_id);
+    }
 }
 
 fn with_hid_api<T, F>(f: F) -> Result<T, BridgeError>
@@ -123,6 +131,18 @@ where
     f(api)
 }
 
+fn with_bg_hid_api<T, F>(f: F) -> Result<T, BridgeError>
+where
+    F: FnOnce(&mut HidApi) -> Result<T, BridgeError>,
+{
+    let mut api_guard = BG_HID_API.lock().unwrap();
+    if api_guard.is_none() {
+        *api_guard = Some(HidApi::new().map_err(|e| BridgeError::HidInit(e.to_string()))?);
+    }
+    let api = api_guard.as_mut().unwrap();
+    f(api)
+}
+
 pub fn list_devices() -> Result<Vec<BridgeDevice>, BridgeError> {
     Ok(DEVICE_CACHE.lock().unwrap().clone())
 }
@@ -130,7 +150,7 @@ pub fn list_devices() -> Result<Vec<BridgeDevice>, BridgeError> {
 pub fn refresh_device_list() -> Result<Vec<BridgeDevice>, BridgeError> {
     let settings = settings();
     
-    with_hid_api(|api| {
+    with_bg_hid_api(|api| {
         api.refresh_devices().map_err(|e| BridgeError::HidInit(e.to_string()))?;
         
         Ok(api
@@ -181,14 +201,13 @@ pub fn write_config(device_id: &str, config: &[u8]) -> Result<(), BridgeError> {
     report[0] = settings.reports.command;
     report[1] = 0x01; // CMD: update config in variable
     report[2..].copy_from_slice(config);
-    device.send_feature_report(&report)?;
+    device.lock().unwrap().send_feature_report(&report).map_err(|e| { evict_device(device_id); e })?;
     
-    // 2. Write config to flash (command 0x02)
+    // 2. Save config (command 0x02)
     let mut save_report = [0_u8; 64];
     save_report[0] = settings.reports.command;
-    save_report[1] = 0x02; // CMD: write config to flash
-    device.send_feature_report(&save_report)?;
-
+    save_report[1] = 0x02; // CMD: save config to flash
+    device.lock().unwrap().send_feature_report(&save_report).map_err(|e| { evict_device(device_id); e })?;
     Ok(())
 }
 
@@ -197,7 +216,7 @@ pub fn read_config(device_id: &str) -> Result<BridgeConfig, BridgeError> {
     let device = open_device(device_id)?;
     let mut buffer = [0_u8; 64];
     buffer[0] = settings.reports.config_read;
-    let len = device.get_feature_report(&mut buffer)?;
+    let len = device.lock().unwrap().get_feature_report(&mut buffer).map_err(|e| { evict_device(device_id); e })?;
 
     if len <= 1 {
         return Err(BridgeError::InvalidConfig(
@@ -215,6 +234,7 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
         Ok(d) => d,
         Err(e) => {
             eprintln!("[DEBUG] open_device failed: {:?}", e);
+            evict_device(device_id);
             return Err(e);
         }
     };
@@ -222,11 +242,13 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     let firmware_result = read_feature_string(&device, settings.reports.firmware_version);
     if let Err(ref e) = firmware_result {
         eprintln!("[DEBUG] firmware read failed: {:?}", e);
+        evict_device(device_id);
     }
     
     let rssi_result = read_rssi(&device, settings.reports.rssi);
     if let Err(ref e) = rssi_result {
         eprintln!("[DEBUG] rssi read failed: {:?}", e);
+        evict_device(device_id);
     }
 
     let (battery_level, is_charging) = read_battery(&device, settings.reports.battery);
@@ -234,11 +256,11 @@ pub fn read_device_info(device_id: &str) -> Result<DeviceInfo, BridgeError> {
     let controller_connected = battery_level.unwrap_or(0) > 0 || rssi_val.unwrap_or(0) < 0;
 
     let manufacturer = device
-        .get_manufacturer_string()
+        .lock().unwrap().get_manufacturer_string()
         .unwrap_or_else(|_| Some("Sony Interactive Entertainment".to_string()))
         .unwrap_or_else(|| "Sony Interactive Entertainment".to_string());
     let product_name = device
-        .get_product_string()
+        .lock().unwrap().get_product_string()
         .unwrap_or_else(|_| Some("Wireless Controller / Dongle".to_string()))
         .unwrap_or_else(|| "Wireless Controller / Dongle".to_string());
 
@@ -339,13 +361,25 @@ pub fn test_adaptive_trigger(
     write_adaptive_trigger_output(device_id, side, 0, 0)
 }
 
-fn open_device(device_id: &str) -> Result<HidDevice, BridgeError> {
-    with_hid_api(|api| {
+fn open_device(device_id: &str) -> Result<std::sync::Arc<std::sync::Mutex<HidDevice>>, BridgeError> {
+    if let Ok(handles) = ACTIVE_HANDLES.lock() {
+        if let Some(device) = handles.get(device_id) {
+            return Ok(std::sync::Arc::clone(device));
+        }
+    }
+
+    let device = with_hid_api(|api| {
         let device_path = std::ffi::CString::new(device_id).map_err(|_| {
             BridgeError::InvalidConfig("장치 경로에 유효하지 않은 문자가 포함되어 있습니다.".into())
         })?;
         api.open_path(&device_path).map_err(BridgeError::from)
-    })
+    })?;
+
+    let arc_device = std::sync::Arc::new(std::sync::Mutex::new(device));
+    if let Ok(mut handles) = ACTIVE_HANDLES.lock() {
+        handles.insert(device_id.to_string(), std::sync::Arc::clone(&arc_device));
+    }
+    Ok(arc_device)
 }
 
 fn send_command(device_id: &str, command: u8, body: Option<&[u8]>) -> Result<(), BridgeError> {
@@ -360,12 +394,15 @@ fn send_command(device_id: &str, command: u8, body: Option<&[u8]>) -> Result<(),
         report[2..end].copy_from_slice(&body[..end - 2]);
     }
 
-    device.send_feature_report(&report)?;
+    device.lock().unwrap().send_feature_report(&report).map_err(|e| { evict_device(device_id); e })?;
     Ok(())
 }
 
 fn write_vibration_output(device_id: &str, weak: u8, strong: u8) -> Result<(), BridgeError> {
+    let start_open = std::time::Instant::now();
     let device = open_device(device_id)?;
+    eprintln!("[DEBUG] open_device took: {:?}", start_open.elapsed());
+
     let mut report = [0_u8; 64];
 
     report[0] = 0x02;
@@ -373,12 +410,20 @@ fn write_vibration_output(device_id: &str, weak: u8, strong: u8) -> Result<(), B
     report[3] = weak;
     report[4] = strong;
 
-    if let Err(ds_error) = device.write(&report[..48]) {
-        device.write(&report).map_err(|dse_error| {
+    let start_write = std::time::Instant::now();
+    if let Err(dse_error) = device.lock().unwrap().write(&report) {
+        eprintln!("[DEBUG] vib device.lock().unwrap().write(64) failed after: {:?}, error: {}", start_write.elapsed(), dse_error);
+        evict_device(device_id);
+        let start_write2 = std::time::Instant::now();
+        device.lock().unwrap().write(&report[..48]).map_err(|ds_error| {
+            eprintln!("[DEBUG] vib device.lock().unwrap().write(48) failed after: {:?}, error: {}", start_write2.elapsed(), ds_error);
+            evict_device(device_id);
             BridgeError::Hid(hidapi::HidError::HidApiError {
-                message: format!("DS 출력 리포트 실패: {ds_error}; DSE 출력 리포트 실패: {dse_error}"),
+                message: format!("64바이트 출력 리포트 실패: {dse_error}; 48바이트 출력 리포트 실패: {ds_error}"),
             })
         })?;
+    } else {
+        eprintln!("[DEBUG] vib device.lock().unwrap().write(64) succeeded after: {:?}", start_write.elapsed());
     }
     Ok(())
 }
@@ -389,7 +434,9 @@ fn write_adaptive_trigger_output(
     position: u8,
     strength: u8,
 ) -> Result<(), BridgeError> {
+    let start_open = std::time::Instant::now();
     let device = open_device(device_id)?;
+    eprintln!("[DEBUG] trigger open_device took: {:?}", start_open.elapsed());
     let mut report = [0_u8; 64];
 
     report[0] = 0x02;
@@ -430,12 +477,20 @@ fn write_adaptive_trigger_output(
         report[trigger_offset + 6] = ((force_zones >> 24) & 0xff) as u8;
     }
 
-    if let Err(ds_error) = device.write(&report[..48]) {
-        device.write(&report).map_err(|dse_error| {
+    let start_write = std::time::Instant::now();
+    if let Err(dse_error) = device.lock().unwrap().write(&report) {
+        eprintln!("[DEBUG] trigger device.lock().unwrap().write(64) failed after: {:?}, error: {}", start_write.elapsed(), dse_error);
+        evict_device(device_id);
+        let start_write2 = std::time::Instant::now();
+        device.lock().unwrap().write(&report[..48]).map_err(|ds_error| {
+            eprintln!("[DEBUG] trigger device.lock().unwrap().write(48) failed after: {:?}, error: {}", start_write2.elapsed(), ds_error);
+            evict_device(device_id);
             BridgeError::Hid(hidapi::HidError::HidApiError {
-                message: format!("DS 적응형 트리거 출력 실패: {ds_error}; DSE 출력 실패: {dse_error}"),
+                message: format!("64바이트 적응형 트리거 출력 실패: {dse_error}; 48바이트 출력 실패: {ds_error}"),
             })
         })?;
+    } else {
+        eprintln!("[DEBUG] trigger device.lock().unwrap().write(64) succeeded after: {:?}", start_write.elapsed());
     }
     Ok(())
 }
@@ -581,10 +636,10 @@ fn validate_config(config: &BridgeConfig, settings: &AppSettings) -> Result<(), 
     Ok(())
 }
 
-fn read_feature_string(device: &HidDevice, report_id: u8) -> Result<Option<String>, BridgeError> {
+fn read_feature_string(device: &std::sync::Arc<std::sync::Mutex<HidDevice>>, report_id: u8) -> Result<Option<String>, BridgeError> {
     let mut buffer = [0_u8; 64];
     buffer[0] = report_id;
-    let len = device.get_feature_report(&mut buffer)?;
+    let len = device.lock().unwrap().get_feature_report(&mut buffer)?;
 
     if len <= 1 {
         return Ok(None);
@@ -601,17 +656,17 @@ fn read_feature_string(device: &HidDevice, report_id: u8) -> Result<Option<Strin
     Ok(Some(s))
 }
 
-fn read_rssi(device: &HidDevice, report_id: u8) -> Result<Option<i8>, BridgeError> {
+fn read_rssi(device: &std::sync::Arc<std::sync::Mutex<HidDevice>>, report_id: u8) -> Result<Option<i8>, BridgeError> {
     let mut buffer = [0_u8; 64];
     buffer[0] = report_id;
-    let len = device.get_feature_report(&mut buffer)?;
+    let len = device.lock().unwrap().get_feature_report(&mut buffer)?;
     Ok((len > 1).then_some(buffer[1] as i8))
 }
 
-fn read_battery(device: &HidDevice, report_id: u8) -> (Option<u8>, Option<bool>) {
+fn read_battery(device: &std::sync::Arc<std::sync::Mutex<HidDevice>>, report_id: u8) -> (Option<u8>, Option<bool>) {
     let mut buffer = [0_u8; 64];
     buffer[0] = report_id;
-    if let Ok(len) = device.get_feature_report(&mut buffer) {
+    if let Ok(len) = device.lock().unwrap().get_feature_report(&mut buffer) {
         if len >= 3 {
             let raw_level = buffer[1];
             // DualSense typically sends battery in a 0-10 scale.

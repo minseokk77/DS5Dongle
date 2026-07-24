@@ -73,6 +73,7 @@
   let toastTimer: number | undefined = $state(undefined);
   let deviceInfoRefreshTimer: number | undefined = $state(undefined);
   let devicePresenceRefreshTimer: number | undefined = $state(undefined);
+  let controllerReportRefreshTimer: number | undefined = $state(undefined);
   let delayedInfoRefreshTimer: number | undefined = $state(undefined);
   let isBusy = $state(false);
   let errorText = $state('');
@@ -86,7 +87,10 @@
   let effectiveTheme = $derived(themeMode === 'system' ? systemTheme : themeMode);
   let selectedDevice = $derived(devices.find((device) => device.id === selectedDeviceId) ?? null);
   let isBridgeConnected = $derived(Boolean(selectedDeviceId && selectedDevice && statusCode !== 'noDevice'));
-  let isControllerConnected = $derived(Boolean(isBridgeConnected && deviceInfo.controller_connected));
+  let controllerReportsActive = $state(false);
+  let latestGamepadTimestamp = 0;
+  let latestGamepadReportAt = 0;
+  let isControllerConnected = $derived(Boolean(isBridgeConnected && (deviceInfo.controller_connected || controllerReportsActive)));
   let showControllerUi = $derived(Boolean(isControllerConnected && deviceInfo.battery_level !== undefined && deviceInfo.battery_level !== null));
   let isDirty = $derived(originalConfig ? JSON.stringify(originalConfig) !== JSON.stringify(config) : false);
   let statusText = $derived(statusOverride || text.status[statusCode]);
@@ -101,9 +105,13 @@
   let rssiStatusLabel = $derived(localizeSignalStatus(deviceInfo.rssi_strength_label || ''));
   let batteryLevel = $derived(deviceInfo.battery_level !== undefined && deviceInfo.battery_level !== null ? deviceInfo.battery_level : null);
   let isCharging = $derived(deviceInfo.is_charging !== undefined && deviceInfo.is_charging !== null ? deviceInfo.is_charging : null);
-  let deviceTitle = $derived(isControllerConnected && selectedDevice
-    ? `${selectedDevice.label.split(' - ')[0]} · ${selectedDevice.vendor_id.toString(16).padStart(4, '0').toUpperCase()}:${selectedDevice.product_id.toString(16).padStart(4, '0').toUpperCase()}`
-    : text.disconnected);
+  let deviceTitle = $derived.by(() => {
+    if (!selectedDevice) return text.disconnected;
+    if (isControllerConnected) {
+      return `${selectedDevice.label.split(' - ')[0]} · ${selectedDevice.vendor_id.toString(16).padStart(4, '0').toUpperCase()}:${selectedDevice.product_id.toString(16).padStart(4, '0').toUpperCase()}`;
+    }
+    return 'DS5 Dongle';
+  });
   let firmwareCapabilities = $derived(buildFirmwareCapabilities());
   let updateStepText = $derived(updateStep === 'idle' ? '' : text.updateSteps[updateStep]);
   let updateProgress = $derived(updateStepProgress(updateStep));
@@ -132,6 +140,9 @@
   }
 
   onMount(() => {
+    // 수동 드래그 스크립트 제거 (Tauri v2 네이티브 data-tauri-drag-region에 완전히 맡김)
+
+
     getVersion().then(v => {
       let displayVersion = v;
       if (v.startsWith('0.0.') && v.length >= 6) {
@@ -177,7 +188,9 @@
     void refreshDevices();
     deviceInfoRefreshTimer = window.setInterval(() => {
       void refreshDeviceInfoOnly();
-    }, 2500);
+    }, 5000);
+    controllerReportRefreshTimer = window.setInterval(refreshControllerReportState, 500);
+    refreshControllerReportState();
     devicePresenceRefreshTimer = window.setInterval(() => {
       void syncDevicePresence();
     }, 3000);
@@ -208,12 +221,32 @@
       if (devicePresenceRefreshTimer !== undefined) {
         window.clearInterval(devicePresenceRefreshTimer);
       }
+      if (controllerReportRefreshTimer !== undefined) {
+        window.clearInterval(controllerReportRefreshTimer);
+      }
       if (delayedInfoRefreshTimer !== undefined) {
         window.clearTimeout(delayedInfoRefreshTimer);
       }
       if (unlisten) unlisten();
     };
   });
+
+  function refreshControllerReportState() {
+    const gamepads = navigator.getGamepads?.() ?? [];
+    const controller = Array.from(gamepads).find((gamepad) =>
+      gamepad?.connected && /wireless controller|054c.*0ce6/i.test(gamepad.id)
+    );
+
+    if (controller) {
+      if (controller.timestamp !== latestGamepadTimestamp) {
+        latestGamepadTimestamp = controller.timestamp;
+        latestGamepadReportAt = Date.now();
+      }
+      controllerReportsActive = Date.now() - latestGamepadReportAt < 1500;
+    } else {
+      controllerReportsActive = false;
+    }
+  }
 
   function setStatus(nextStatus: StatusCode) {
     statusCode = nextStatus;
@@ -410,7 +443,7 @@
   }
 
   async function refreshDeviceInfoOnly() {
-    if (!selectedDeviceId || isBusy || statusCode === 'updating' || statusCode === 'updateChecking') {
+    if (!selectedDeviceId || isBusy || statusCode === 'updating' || statusCode === 'updateChecking' || !controllerReportsActive) {
       return;
     }
 
@@ -727,6 +760,7 @@
 </script>
 
 <main class:theme-light={effectiveTheme === 'light'} class:theme-dark={effectiveTheme === 'dark'} class="app-shell" class:modal-open={showInputTesterModal || showSettingsModal}>
+
 
   {#if toastText}
     <div class:error={toastKind === 'error'} class="toast" role="status">
