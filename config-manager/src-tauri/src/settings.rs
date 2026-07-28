@@ -37,7 +37,9 @@ pub struct ConfigSettings {
     pub body_length: usize,
     pub haptics_gain_min: f32,
     pub haptics_gain_max: f32,
+    #[allow(dead_code)]
     pub speaker_volume_percent_min: f32,
+    #[allow(dead_code)]
     pub speaker_volume_percent_max: f32,
     pub inactive_time_min: u8,
     pub inactive_time_max: u8,

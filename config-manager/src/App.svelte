@@ -707,9 +707,9 @@
       setStatus('updating');
     }
 
-    updateStep = selectedDeviceId ? 'bootloader' : 'copying';
+    updateStep = previousDeviceId ? 'bootloader' : 'copying';
     statusOverride = text.updateSteps[updateStep];
-    const result = await flashLatestDebugFirmware(selectedDeviceId || undefined);
+    const result = await flashLatestDebugFirmware(previousDeviceId || undefined);
     updateStep = 'copying';
     addLog(`${text.status.updated}: ${result.version} / ${result.asset_name}`);
     const shouldRestoreSettings = Boolean(preservedConfig && previousDeviceId);

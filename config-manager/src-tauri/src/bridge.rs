@@ -192,6 +192,7 @@ pub fn refresh_device_list() -> Result<Vec<BridgeDevice>, BridgeError> {
     })
 }
 
+#[allow(dead_code)]
 pub fn write_config(device_id: &str, config: &[u8]) -> Result<(), BridgeError> {
     let settings = settings();
     let device = open_device(device_id)?;

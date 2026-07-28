@@ -259,6 +259,17 @@ int main() {
 #endif
 
     board_init();
+
+    if (cyw43_arch_init()) {
+        printf("Failed to initialize CYW43\n");
+        return 1;
+    }
+    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
+
+#if ENABLE_BATT_LED
+    battery_led_init();
+#endif
+
     tusb_rhport_init_t dev_init = {
         .role = TUSB_ROLE_DEVICE,
         .speed = TUSB_SPEED_FULL
@@ -271,16 +282,6 @@ int main() {
     board_init_after_tusb();
 #if ENABLE_SERIAL
     stdio_usb_init();
-#endif
-
-    if (cyw43_arch_init()) {
-        printf("Failed to initialize CYW43\n");
-        return 1;
-    }
-    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
-
-#if ENABLE_BATT_LED
-    battery_led_init();
 #endif
 
 #if !ENABLE_SERIAL

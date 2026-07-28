@@ -5,7 +5,6 @@ use std::{
     fs,
     path::Path,
     ptr,
-    thread,
     time::{Duration, Instant},
 };
 use thiserror::Error;
@@ -55,6 +54,7 @@ pub struct AppUpdateInfo {
     pub body: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 pub struct BootloaderStatus {
     pub available: bool,
@@ -64,6 +64,7 @@ pub struct BootloaderStatus {
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
     tag_name: String,
+    #[allow(dead_code)]
     draft: bool,
     body: Option<String>,
     assets: Vec<GitHubAsset>,
@@ -132,7 +133,11 @@ pub async fn check_app_update(current_version: &str) -> Result<Option<AppUpdateI
     let normalized_tag = if tag.starts_with("v0.0.") {
         let parts: Vec<&str> = tag.split('.').collect();
         if parts.len() == 4 {
-            format!("v0.0.{}{}", parts[2], parts[3])
+            if parts[3].len() == 1 {
+                format!("v0.0.{}0{}", parts[2], parts[3])
+            } else {
+                format!("v0.0.{}{}", parts[2], parts[3])
+            }
         } else {
             tag.clone()
         }
@@ -187,14 +192,18 @@ pub async fn flash_latest_debug_firmware(
         None => {
             if let Some(device_id) = device_id.as_deref().filter(|value| !value.is_empty()) {
                 let device_id = device_id.to_owned();
-                // 1200 bps baud rate reset (Standard Pico SDK BOOTSEL trigger)
                 let _ = tauri::async_runtime::spawn_blocking(move || {
-                    trigger_picoboot_reset();
                     let _ = bridge::enter_bootloader(&device_id);
+                    // 강제 시리얼 리셋은 Pico가 재부팅되는 찰나의 USB 스택을 건드려
+                    // RPI-RP2 드라이브 인식을 방해할 수 있으므로 완전히 제거합니다.
+                    // trigger_picoboot_reset();
                 }).await;
                 wait_for_bootloader_drive(Duration::from_secs(30)).await?
             } else {
-                return Err(UpdateError::BootDriveNotFound);
+                return Err(UpdateError::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "기기가 연결되지 않았거나 선택되지 않았습니다. 기기를 먼저 연결해주세요.",
+                )));
             }
         }
     };
@@ -354,6 +363,7 @@ fn wide_null(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain([0]).collect()
 }
 
+#[allow(dead_code)]
 pub fn bootloader_status() -> Result<BootloaderStatus, UpdateError> {
     let drive = find_bootloader_drive_optional()?;
     Ok(BootloaderStatus {
