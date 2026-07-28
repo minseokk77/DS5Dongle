@@ -519,10 +519,21 @@
     if (!selectedDeviceId) return;
     setStatus('reading');
 
-    const [infoResult, configResult] = await Promise.allSettled([
-      readDeviceInfo(selectedDeviceId),
-      readConfig(selectedDeviceId)
-    ]);
+    let infoResult: { status: 'fulfilled', value: any } | { status: 'rejected', reason: any };
+    try {
+      const value = await readDeviceInfo(selectedDeviceId);
+      infoResult = { status: 'fulfilled', value };
+    } catch (reason) {
+      infoResult = { status: 'rejected', reason };
+    }
+
+    let configResult: { status: 'fulfilled', value: any } | { status: 'rejected', reason: any };
+    try {
+      const value = await readConfig(selectedDeviceId);
+      configResult = { status: 'fulfilled', value };
+    } catch (reason) {
+      configResult = { status: 'rejected', reason };
+    }
 
     if (infoResult.status === 'fulfilled') {
       deviceInfo = infoResult.value;
