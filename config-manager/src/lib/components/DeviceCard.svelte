@@ -187,7 +187,7 @@
     {/if}
 
     <button class="light-btn" type="button" onclick={onRefreshDevices} disabled={isBusy}>
-      <Icon name="cable" size={15} /> {text.connect}
+      <Icon name={status === 'connected' ? 'refresh-cw' : 'cable'} size={15} /> {status === 'connected' ? text.refresh : text.connect}
     </button>
 
     {#if onOpenSettings}
