@@ -358,10 +358,21 @@ void bt_inquiring_led() {
     if (hid_interrupt_cid != 0) {
         return;
     }
+
     static bool led_status = false;
+
+    if (get_config().disable_pico_led) {
+        if (led_status) {
+            cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
+            led_status = false;
+        }
+        return;
+    }
+
     if (!bt_inquiring) {
         if (led_status) {
             cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
+            led_status = false;
         }
         return;
     }
@@ -729,6 +740,8 @@ static void __not_in_flash_func(l2cap_packet_handler)(uint8_t packet_type, uint1
 
                     if (!get_config().disable_pico_led) {
                         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, true);
+                    } else {
+                        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
                     }
                     inactive_time = get_absolute_time();
 
