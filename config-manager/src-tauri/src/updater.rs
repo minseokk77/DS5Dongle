@@ -174,8 +174,25 @@ pub async fn install_app_update(download_url: &str) -> Result<(), UpdateError> {
     let target = temp_dir.join("DS5Dongle_Setup.exe");
     fs::write(&target, bytes)?;
     
-    std::process::Command::new(&target)
-        .arg("/S")
+    let current_exe = std::env::current_exe()?;
+    let current_exe_path = current_exe.to_string_lossy().replace('\'', "''");
+    let target_path = target.to_string_lossy().replace('\'', "''");
+    
+    let script = format!(
+        "Start-Process -Wait -FilePath '{}' -ArgumentList '/S'; Start-Process -FilePath '{}'",
+        target_path,
+        current_exe_path
+    );
+    let temp_script = temp_dir.join("ds5_update.ps1");
+    fs::write(&temp_script, script)?;
+    
+    std::process::Command::new("powershell")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-WindowStyle")
+        .arg("Hidden")
+        .arg("-File")
+        .arg(&temp_script)
         .spawn()?;
         
     // Exit current app so installer can overwrite files
